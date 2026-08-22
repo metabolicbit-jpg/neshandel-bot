@@ -1,5 +1,5 @@
 // ── neshandel-bot — نسخه ۴: قرعه‌کشی کاملاً تصادفی + رندر Schema-aware
-import { CONTENT } from "./content.js";
+import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
 const BASE = "https://tapi.bale.ai";
