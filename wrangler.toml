@@ -1,4 +1,7 @@
 name = "neshandel-bot"
 main = "index.js"
 compatibility_date = "2026-08-01"
-account_id = "c3d95c783bd334edd94c13fb99b5f413"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "cf1d0c2d23d649f3a605dcbcbed90d9f"
