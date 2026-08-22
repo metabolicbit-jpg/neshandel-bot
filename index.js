@@ -73,7 +73,7 @@ async function onMessage(m){
   const chat=m.chat.id, text=(m.text||"").trim();
   if(text==="/start") return sendMessage(chat,WELCOME,mainKb);
   if(text==="🔮 استخاره") return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
-  if(text==="👤 حساب من") return sendMessage(chat,"👤 <b>حساب من</b>\n\n💎 اعتبار: ۲ (هدیه)\n🔮 استخاره‌ها: ۰\n🔓 باز شده: ۰",mainKb);
+  if(text==="👤 حساب من") return sendMessage(chat,"👤 <b>حساب من</b>\n\n💎 اعتبار: ۲ (هدیه)\n🔮 استخاره‌ها: ۰\n باز شده: ۰",mainKb);
   if(text==="🛍 فروشگاه") return sendMessage(chat,"🛍 <b>فروشگاه</b>\n\nپرداخت واقعی به‌زودی فعال می‌شود.",mainKb);
   return sendMessage(chat,"برای شروع، «🔮 استخاره» را بزن.",mainKb);
 }
