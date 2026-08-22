@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۵: unlockMsg v3 (رایگان + تخصصی پیشرفته)
+// ── neshandel-bot — نسخه ۷: حداقلِ ممکنِ write روی KV
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -46,7 +46,6 @@ const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن ک�
 const topicFa  = (t) => (TOPICS.find(x=>x[0]===t)||[,t])[1];
 const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
 
-// ── بلوک موضوعی Schema-aware + fallback برای رکوردهای قدیمی
 function topicBlock(r,t){
   const T=(r.topics||{})[t];
   if(T) return T;
@@ -72,11 +71,8 @@ function freeMsg(r,t){
   ].join("\n");
 }
 
-// ── unlockMsg v3: رکوردهای جدید با premium و رکوردهای قدیمی با fallback
 function unlockMsg(r,t){
   const T=(r.topics||{})[t]||{};
-
-  // ── رکوردهای v3 (دارای فیلد premium)
   if(r.premium){
     const P=r.premium;
     return [
@@ -96,8 +92,6 @@ function unlockMsg(r,t){
       "⚠️ <b>اشتباه رایج:</b> "+P.common_mistake
     ].join("\n");
   }
-
-  // ── fallback برای رکوردهای قدیمی (B1/B2)
   const B=topicBlock(r,t);
   return [
     "🔓 <b>برداشت تخصصی «"+topicFa(t)+"»</b>","",
@@ -109,12 +103,18 @@ function unlockMsg(r,t){
   ].join("\n");
 }
 
-// ── مدیریت کاربر با KV
+// ── KV: خواندن همیشه؛ نوشتن فقط وقتی واقعاً لازم است
 async function getUser(env, chatId){
-  const u = await env.KV.get("u:"+chatId, "json");
-  return u || { credits:2, draws:0, unlocks:0, last:-1, topic:"marriage", unlocked:[] };
+  try {
+    const raw = await env.KV.get("u:"+chatId);
+    if (raw) return { u: JSON.parse(raw), exists: true };
+  } catch(e){ console.error("getUser:", e); }
+  return { u: { credits:2, draws:0, unlocks:0, last:-1, topic:"marriage", unlocked:[] }, exists: false };
 }
-const saveUser = (env, chatId, u) => env.KV.put("u:"+chatId, JSON.stringify(u));
+async function saveUser(env, chatId, u){
+  try { await env.KV.put("u:"+chatId, JSON.stringify(u)); }
+  catch(e){ console.error("saveUser:", e); }
+}
 
 // ── قرعه‌کشی کاملاً تصادفی و یکنواخت
 function pickIndex(){
@@ -123,16 +123,15 @@ function pickIndex(){
   return b[0] % CONTENT.length;
 }
 
-// ── handler ها
+// ── handler ها (مسیرهای خواندنی = صفر write)
 async function onMessage(m, env){
   const chat=m.chat.id, text=(m.text||"").trim();
   if(text==="/start"){
-    const u = await getUser(env, chat); await saveUser(env, chat, u);
-    return sendMessage(chat, WELCOME, mainKb);
+    return sendMessage(chat, WELCOME, mainKb);            // ← صفر write
   }
   if(text==="🔮 استخاره") return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
   if(text==="👤 حساب من"){
-    const u = await getUser(env, chat);
+    const {u} = await getUser(env, chat);
     return sendMessage(chat,
       "👤 <b>حساب من</b>\n\n💎 اعتبار: "+toFa(u.credits)+
       "\n🔮 استخاره‌ها: "+toFa(u.draws)+
@@ -145,14 +144,15 @@ async function onMessage(m, env){
 async function onCallback(cq, env){
   const chat=cq.message.chat.id, data=cq.data||"";
   await answerCallback(cq.id);
-  const u = await getUser(env, chat);
+  const {u, exists} = await getUser(env, chat);
 
-  if(data==="home"){ await saveUser(env,chat,u); return sendMessage(chat,"🏠 منوی اصلی",mainKb); }
-  if(data==="new"){ await saveUser(env,chat,u); return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb); }
+  if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);          // ← صفر write
+  if(data==="new")   return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb); // ← صفر write
 
   if(data.startsWith("topic:")){
-    u.topic = data.slice(6); await saveUser(env,chat,u);
-    return sendMessage(chat, RITUAL, ritualKb(u.topic));
+    const t = data.slice(6);
+    if(exists && u.topic !== t){ u.topic = t; await saveUser(env,chat,u); }   // ← write فقط اگر عوض شد
+    return sendMessage(chat, RITUAL, ritualKb(t));
   }
 
   if(data.startsWith("draw:")){
@@ -160,21 +160,23 @@ async function onCallback(cq, env){
     u.topic = t;
     u.last = pickIndex();
     u.draws += 1;
-    await saveUser(env,chat,u);
+    await saveUser(env,chat,u);   // ← write ضروری (ثبت قرعه)
     await sendMessage(chat,"🔮 در حال انجام استخاره...");
     return sendMessage(chat, freeMsg(CONTENT[u.last], t), resultKb(t));
   }
 
   if(data.startsWith("unlock:")){
     const t = data.slice(7);
+    const rec = CONTENT[u.last];
+    if(!rec) return sendMessage(chat,"⚠️ خطای کوچک؛ لطفاً یک استخارهٔ جدید بگیر.",mainKb);
     const key = u.last+":"+t;
     if(u.unlocked.includes(key)){
-      return sendMessage(chat, unlockMsg(CONTENT[u.last], t), mainKb);
+      return sendMessage(chat, unlockMsg(rec, t), mainKb);   // ← صفر write
     }
     if(u.credits>0){
       u.credits -= 1; u.unlocks += 1; u.unlocked.push(key);
-      await saveUser(env,chat,u);
-      return sendMessage(chat, unlockMsg(CONTENT[u.last], t), mainKb);
+      await saveUser(env,chat,u);   // ← write ضروری (کسر اعتبار)
+      return sendMessage(chat, unlockMsg(rec, t), mainKb);
     }
     return sendMessage(chat,"💎 اعتبار کافی نیست.\n\nبه‌زودی می‌توانی از فروشگاه اعتبار بخری.",mainKb);
   }
