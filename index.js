@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۴: قرعه‌کشی کاملاً تصادفی + رندر Schema-aware
+// ── neshandel-bot — نسخه ۵: unlockMsg v3 (رایگان + تخصصی پیشرفته)
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -46,7 +46,7 @@ const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن ک�
 const topicFa  = (t) => (TOPICS.find(x=>x[0]===t)||[,t])[1];
 const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
 
-// ── تغییر ۲: بلوک موضوعی Schema-aware + fallback برای رکوردهای قدیمی
+// ── بلوک موضوعی Schema-aware + fallback برای رکوردهای قدیمی
 function topicBlock(r,t){
   const T=(r.topics||{})[t];
   if(T) return T;
@@ -57,6 +57,9 @@ function topicBlock(r,t){
 
 function freeMsg(r,t){
   const B=topicBlock(r,t);
+  const teaser = r.premium
+    ? "💎 تحلیل تصمیم + چک‌لیست اختصاصی + شرایط برو/توقف و…"
+    : (B.guidance||"").slice(0,70)+"…";
   return [
     r.badge+" <b>نتیجه:</b> "+r.verdict,
     "<b>"+r.headline+"</b>","",
@@ -65,10 +68,36 @@ function freeMsg(r,t){
     "📜 "+r.translation,"",
     ...r.guidance.map(g=>"✨ "+g),"",
     "🔒 <b>برداشت تخصصی «"+topicFa(t)+"»:</b>",
-    (B.guidance||"").slice(0,70)+"…"
+    teaser
   ].join("\n");
 }
+
+// ── unlockMsg v3: رکوردهای جدید با premium و رکوردهای قدیمی با fallback
 function unlockMsg(r,t){
+  const T=(r.topics||{})[t]||{};
+
+  // ── رکوردهای v3 (دارای فیلد premium)
+  if(r.premium){
+    const P=r.premium;
+    return [
+      "🔓 <b>برداشت تخصصی «"+topicFa(t)+"»</b>","",
+      "🧭 <b>جمع‌بندی:</b> "+P.final_verdict,"",
+      "🔍 <b>تحلیل تصمیم:</b>",P.decision_analysis,"",
+      "🟢 <b>نقطهٔ قوت:</b> "+P.strengths,
+      "⚠️ <b>نقطهٔ خطر:</b> "+P.risks,"",
+      "✅ <b>کی جلو بروم؟</b>",
+      ...P.go_conditions.map(c=>"• "+c),"",
+      "🛑 <b>کی متوقف شوم؟</b>",
+      ...P.stop_conditions.map(c=>"• "+c),"",
+      "📋 <b>چک‌لیست «"+topicFa(t)+"»:</b>",
+      ...(T.checklist||[]).map(c=>"☐ "+c),"",
+      "💡 "+(T.topic_note||""),
+      "📖 <b>مثال واقعی:</b> "+P.real_example,
+      "⚠️ <b>اشتباه رایج:</b> "+P.common_mistake
+    ].join("\n");
+  }
+
+  // ── fallback برای رکوردهای قدیمی (B1/B2)
   const B=topicBlock(r,t);
   return [
     "🔓 <b>برداشت تخصصی «"+topicFa(t)+"»</b>","",
@@ -87,7 +116,7 @@ async function getUser(env, chatId){
 }
 const saveUser = (env, chatId, u) => env.KV.put("u:"+chatId, JSON.stringify(u));
 
-// ── تغییر ۱: قرعه‌کشی کاملاً تصادفی و یکنواخت (بدون هیچ الگوریتم جهت‌دهنده)
+// ── قرعه‌کشی کاملاً تصادفی و یکنواخت
 function pickIndex(){
   const b = new Uint32Array(1);
   crypto.getRandomValues(b);
