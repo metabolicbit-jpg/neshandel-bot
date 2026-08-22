@@ -1,8 +1,7 @@
-// ── neshandel-bot — Cloudflare Worker (webhook) — نسخه کامل
+// ── neshandel-bot — نسخه ۲: سیستم اعتبار واقعی با KV
 let TOKEN = "";
 const BASE = "https://tapi.bale.ai";
 
-// ── محتوای استخاره (رکوردهای تأییدشده — مطابق PAGE_MAP)
 const CONTENT = [
 { page:245, surah:"یوسف", ayah:79,
   arabic:"قَالَ مَعَاذَ ٱللَّهِ أَن نَّأْخُذَ إِلَّا مَن وَجَدْنَا مَتَـٰعَنَا عِندَهُۥٓ إِنَّآ إِذًا لَّظَـٰلِمُونَ",
@@ -28,7 +27,7 @@ const CONTENT = [
   caution:"فاصله گرفتن به معنای فرار نیست؛ به معنای انتخاب محیط سالم‌تر است." },
 { page:325, surah:"انبیاء", ayah:36,
   arabic:"وَإِذَا رَءَاكَ ٱلَّذِينَ كَفَرُوٓا۟ إِن يَتَّخِذُونَكَ إِلَّا هُزُوًا أَهَـٰذَا ٱلَّذِى يَذْكُرُ ءَالِهَتَكُمْ وَهُم بِذِكْرِ ٱلرَّحْمَـٰنِ هُمْ كَـٰفِرُونَ",
-  translation:"و کسانی که کافر شدند، چون تو را ببینند فقط به مسخره‌ات می‌گیرند [و می‌گویند:] «آیا این همان کس است که خدایانتان را [به بدی] یاد می‌کند؟» در حالی که آنان خود، یاد [خدای] رحمان را منکرند.",
+  translation:"و کسانی که کافر شدند، چون تو را ببینند فقط به مسخره‌ات می‌گیرند [و می‌گویند:] «آیا این همان کس است که خدایانتان را [به بدی‌] یاد می‌کند؟» در حالی که آنان خود، یاد [خدای‌] رحمان را منکرند.",
   badge:"🔴", verdict:"احتیاط جدی؛ اگر تمسخر و تحقیر الگوی تکرارشونده است، فاصله بگیر.",
   headline:"🛑 تمسخر و تحقیر مداوم را عادی ندان.",
   guidance:["بین اختلاف نظر و تمسخر تفاوت بگذار.","اگر تحقیر و تمسخر تکرار می‌شود، این یک هشدار جدی است.","در برابر رفتار ناسالم، خودت را وارد درگیری نکن؛ فاصله بگیر."],
@@ -61,7 +60,7 @@ const CONTENT = [
   caution:"اگر پایه سالم است، این آیه هشدار نیست؛ فقط پایهٔ ناسالم را نشانه می‌گیرد." }
 ];
 
-// ── توابع API بله
+// ── API بله
 async function baleCall(method, payload){
   const res = await fetch(`${BASE}/bot${TOKEN}/${method}`, {
     method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
@@ -96,12 +95,12 @@ const resultKb = (t)=>({ inline_keyboard:[
   [{text:"🏠 منوی اصلی",callback_data:"home"}]
 ]});
 
-// ── پیام‌ها
 const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
 const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
 
 const topicText = (r,t) => t==="marriage" ? r.marriage : t==="transaction" ? r.transaction : r.key;
 const topicFa  = (t) => (TOPICS.find(x=>x[0]===t)||[,t])[1];
+const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
 
 function freeMsg(r,t){
   const tt = topicText(r,t);
@@ -126,58 +125,86 @@ function unlockMsg(r,t){
   ].join("\n");
 }
 
+// ── مدیریت کاربر با KV
+async function getUser(env, chatId){
+  const u = await env.KV.get("u:"+chatId, "json");
+  return u || { credits:2, draws:0, unlocks:0, last:0, topic:"marriage", unlocked:[] };
+}
+const saveUser = (env, chatId, u) => env.KV.put("u:"+chatId, JSON.stringify(u));
+
 // ── handler ها
-async function onMessage(m){
+async function onMessage(m, env){
   const chat=m.chat.id, text=(m.text||"").trim();
-  if(text==="/start") return sendMessage(chat,WELCOME,mainKb);
+  if(text==="/start"){
+    const u = await getUser(env, chat); await saveUser(env, chat, u);
+    return sendMessage(chat, WELCOME, mainKb);
+  }
   if(text==="🔮 استخاره") return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
-  if(text==="👤 حساب من") return sendMessage(chat,"👤 <b>حساب من</b>\n\n💎 اعتبار: ۲ (هدیه)\n🔮 استخاره‌ها: ۰\n باز شده: ۰",mainKb);
+  if(text==="👤 حساب من"){
+    const u = await getUser(env, chat);
+    return sendMessage(chat,
+      "👤 <b>حساب من</b>\n\n💎 اعتبار: "+toFa(u.credits)+
+      "\n🔮 استخاره‌ها: "+toFa(u.draws)+
+      "\n🔓 باز شده: "+toFa(u.unlocks), mainKb);
+  }
   if(text==="🛍 فروشگاه") return sendMessage(chat,"🛍 <b>فروشگاه</b>\n\nپرداخت واقعی به‌زودی فعال می‌شود.",mainKb);
   return sendMessage(chat,"برای شروع، «🔮 استخاره» را بزن.",mainKb);
 }
-async function onCallback(cq){
+
+async function onCallback(cq, env){
   const chat=cq.message.chat.id, data=cq.data||"";
   await answerCallback(cq.id);
-  if(data==="home") return sendMessage(chat,"🏠 منوی اصلی",mainKb);
-  if(data==="new") return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
-  if(data.startsWith("topic:")) return sendMessage(chat,RITUAL,ritualKb(data.slice(6)));
-  if(data.startsWith("draw:")){
-    const t=data.slice(5);
-    await sendMessage(chat,"🔮 در حال انجام استخاره...");
-    const r = CONTENT[Math.floor(Math.random()*CONTENT.length)];
-    return sendMessage(chat,freeMsg(r,t),resultKb(t));
+  const u = await getUser(env, chat);
+
+  if(data==="home"){ await saveUser(env,chat,u); return sendMessage(chat,"🏠 منوی اصلی",mainKb); }
+  if(data==="new"){ await saveUser(env,chat,u); return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb); }
+
+  if(data.startsWith("topic:")){
+    u.topic = data.slice(6); await saveUser(env,chat,u);
+    return sendMessage(chat, RITUAL, ritualKb(u.topic));
   }
+
+  if(data.startsWith("draw:")){
+    const t = data.slice(5);
+    u.topic = t;
+    u.last = Math.floor(Math.random()*CONTENT.length);
+    u.draws += 1;
+    await saveUser(env,chat,u);
+    await sendMessage(chat,"🔮 در حال انجام استخاره...");
+    return sendMessage(chat, freeMsg(CONTENT[u.last], t), resultKb(t));
+  }
+
   if(data.startsWith("unlock:")){
-    const t=data.slice(7);
-    const r = CONTENT[Math.floor(Math.random()*CONTENT.length)];
-    return sendMessage(chat,unlockMsg(r,t),mainKb);
+    const t = data.slice(7);
+    const key = u.last+":"+t;
+    if(u.unlocked.includes(key)){
+      return sendMessage(chat, unlockMsg(CONTENT[u.last], t), mainKb);
+    }
+    if(u.credits>0){
+      u.credits -= 1; u.unlocks += 1; u.unlocked.push(key);
+      await saveUser(env,chat,u);
+      return sendMessage(chat, unlockMsg(CONTENT[u.last], t), mainKb);
+    }
+    return sendMessage(chat,"💎 اعتبار کافی نیست.\n\nبه‌زودی می‌توانی از فروشگاه اعتبار بخری.",mainKb);
   }
 }
 
 export default {
   async fetch(request, env){
     TOKEN = env.BOT_TOKEN || "";
-
     if(request.method==="GET"){
       const url=new URL(request.url);
       if(url.pathname==="/test"){
-        const out={ hasToken: !!env.BOT_TOKEN };
-        if(out.hasToken){
-          try{
-            out.getMe = await fetch(`${BASE}/bot${env.BOT_TOKEN}/getMe`).then(r=>r.json());
-            out.webhook = await fetch(`${BASE}/bot${env.BOT_TOKEN}/getWebhookInfo`).then(r=>r.json());
-          }catch(e){ out.error=String(e); }
-        }
+        const out={ hasToken: !!env.BOT_TOKEN, hasKV: !!env.KV };
         return new Response(JSON.stringify(out,null,2),{headers:{"Content-Type":"application/json"}});
       }
       return new Response("ok");
     }
-
     if(request.method==="POST"){
       try{
         const u = await request.json();
-        if(u.message) await onMessage(u.message);
-        else if(u.callback_query) await onCallback(u.callback_query);
+        if(u.message) await onMessage(u.message, env);
+        else if(u.callback_query) await onCallback(u.callback_query, env);
       }catch(e){ console.error(e); }
     }
     return new Response("ok");
