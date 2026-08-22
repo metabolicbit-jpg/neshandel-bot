@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۳: محتوا از content.js + قرعه‌کشی بدون تکرار
+// ── neshandel-bot — نسخه ۴: قرعه‌کشی کاملاً تصادفی + رندر Schema-aware
 import { CONTENT } from "./content.js";
 
 let TOKEN = "";
@@ -43,12 +43,20 @@ const resultKb = (t)=>({ inline_keyboard:[
 const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
 const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
 
-const topicText = (r,t) => t==="marriage" ? r.marriage : t==="transaction" ? r.transaction : r.key;
 const topicFa  = (t) => (TOPICS.find(x=>x[0]===t)||[,t])[1];
 const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
 
+// ── تغییر ۲: بلوک موضوعی Schema-aware + fallback برای رکوردهای قدیمی
+function topicBlock(r,t){
+  const T=(r.topics||{})[t];
+  if(T) return T;
+  if(t==="marriage"&&r.marriage) return {verdict:r.verdict,guidance:r.marriage,action:r.action};
+  if(t==="transaction"&&r.transaction) return {verdict:r.verdict,guidance:r.transaction,action:r.action};
+  return {verdict:r.verdict,guidance:r.key,action:r.action};
+}
+
 function freeMsg(r,t){
-  const tt = topicText(r,t);
+  const B=topicBlock(r,t);
   return [
     r.badge+" <b>نتیجه:</b> "+r.verdict,
     "<b>"+r.headline+"</b>","",
@@ -57,14 +65,16 @@ function freeMsg(r,t){
     "📜 "+r.translation,"",
     ...r.guidance.map(g=>"✨ "+g),"",
     "🔒 <b>برداشت تخصصی «"+topicFa(t)+"»:</b>",
-    tt.slice(0,70)+"…"
+    (B.guidance||"").slice(0,70)+"…"
   ].join("\n");
 }
 function unlockMsg(r,t){
+  const B=topicBlock(r,t);
   return [
     "🔓 <b>برداشت تخصصی «"+topicFa(t)+"»</b>","",
-    topicText(r,t),"",
-    "🎯 <b>اقدام:</b> "+r.action,
+    "⚖️ "+(B.verdict||r.verdict),"",
+    B.guidance,"",
+    "🎯 <b>اقدام:</b> "+(B.action||r.action),
     "🛡 <b>احتیاط:</b> "+r.caution,"",
     "💎 <i>"+r.key+"</i>"
   ].join("\n");
@@ -77,12 +87,11 @@ async function getUser(env, chatId){
 }
 const saveUser = (env, chatId, u) => env.KV.put("u:"+chatId, JSON.stringify(u));
 
-// ── قرعه‌کشی (بدون تکرار پشت‌سرهم)
-function pickIndex(prev){
-  if (CONTENT.length <= 1) return 0;
-  let i;
-  do { i = Math.floor(Math.random()*CONTENT.length); } while (i === prev);
-  return i;
+// ── تغییر ۱: قرعه‌کشی کاملاً تصادفی و یکنواخت (بدون هیچ الگوریتم جهت‌دهنده)
+function pickIndex(){
+  const b = new Uint32Array(1);
+  crypto.getRandomValues(b);
+  return b[0] % CONTENT.length;
 }
 
 // ── handler ها
@@ -120,7 +129,7 @@ async function onCallback(cq, env){
   if(data.startsWith("draw:")){
     const t = data.slice(5);
     u.topic = t;
-    u.last = pickIndex(u.last);
+    u.last = pickIndex();
     u.draws += 1;
     await saveUser(env,chat,u);
     await sendMessage(chat,"🔮 در حال انجام استخاره...");
