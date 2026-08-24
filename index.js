@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۷: حداقلِ ممکنِ write روی KV
+// ── neshandel-bot — نسخه ۷: حداقلِ ممکنِ write روی KV + لحن v4
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -57,7 +57,7 @@ function topicBlock(r,t){
 function freeMsg(r,t){
   const B=topicBlock(r,t);
   const teaser = r.premium
-    ? "💎 تحلیل تصمیم + چک‌لیست اختصاصی + شرایط برو/توقف و…"
+    ? "💎 تحلیل کامل + چک‌لیست مخصوص موضوع تو + کی بروم/کی بایستم…"
     : (B.guidance||"").slice(0,70)+"…";
   return [
     r.badge+" <b>نتیجه:</b> "+r.verdict,
@@ -65,8 +65,11 @@ function freeMsg(r,t){
     "📖 سوره "+r.surah+" — آیهٔ "+toFa(r.ayah)+" (صفحهٔ "+toFa(r.page)+")",
     r.arabic,"",
     "📜 "+r.translation,"",
-    ...r.guidance.map(g=>"✨ "+g),"",
-    "🔒 <b>برداشت تخصصی «"+topicFa(t)+"»:</b>",
+    (r.opener||"بذار این آیه رو بذاریم کنارِ تصمیمت:"),
+    (r.plain||""),"",
+    "✨ سه چراغ از دلِ آیه:",
+    ...r.guidance.map(g=>"• "+g),"",
+    "🔒 اگه می‌خوای بدونی این آیه دربارهٔ «"+topicFa(t)+"» دقیقاً چی می‌گه:",
     teaser
   ].join("\n");
 }
