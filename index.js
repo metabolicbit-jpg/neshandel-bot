@@ -1,9 +1,8 @@
-// ── neshandel-bot — نسخه ۱۰: پخش (تکی/چندتایی/همگانی) + لیست اعضا
+// ── neshandel-bot — نسخه ۱۱: امنیت چندلایه + حالت خصوصی
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
 let WALLET_TOKEN = "";
-let ALLOWED_USERS = [];
 const BASE = "https://tapi.bale.ai";
 
 // ── API بله
@@ -26,8 +25,8 @@ const answerPreCheckout = (id, ok, error_message) =>
 
 // ── بسته‌ها
 const PACKS = [
-  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — باز کردن ۱۰ برداشت تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰۰۰۰ تومان" },
-  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",  label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",               text:"🥈 ۳۵ اعتبار — ۵۰۰۰۰ تومان" },
+  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — باز کردن ۱۰ برداشت تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰٬۰۰۰ تومان" },
+  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",  label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",               text:"🥈 ۳۵ اعتبار — ۵۰٬۰۰۰ تومان" },
   { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",             text:"🥇 ۱۲۰ اعتبار — ۱۵۰٬۰۰۰ تومان" },
 ];
 const storeKb = { inline_keyboard: PACKS.map(p=>[{ text:p.text, callback_data:"buy:"+p.id }]) };
@@ -44,7 +43,7 @@ const topicKb = { inline_keyboard:[
   [ {text:"❤️ ازدواج",callback_data:"topic:marriage"},{text:"💰 معامله",callback_data:"topic:transaction"} ],
   [ {text:"💼 کار",callback_data:"topic:work"},{text:"🏠 خانه",callback_data:"topic:home"} ],
   [ {text:"🚗 خودرو",callback_data:"topic:car"},{text:"✈️ سفر",callback_data:"topic:travel"} ],
-  [ {text:"📚 تحصیل",callback_data:"topic:study"},{text:"❔ تصمیم دیگر",callback_data:"topic:other"} ]
+  [ {text:"📚 تحصیل",callback_data:"topic:study"},{text:"❓ تصمیم دیگر",callback_data:"topic:other"} ]
 ]};
 const ritualKb = (t)=>({ inline_keyboard:[
   [{text:"🤲 خواندم، استخاره کن",callback_data:"draw:"+t}],
@@ -61,6 +60,7 @@ const resultKb = (t)=>({ inline_keyboard:[
 const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
 const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
 const PRIVATE_MSG = "🔒 این بات در حال تست خصوصی است.\n\nفعلاً فقط کاربران منتخب می‌توانند از آن استفاده کنند.\n\nبه‌زودی برای همه فعال می‌شود. 🌿";
+const ADMIN_ONLY_MSG = "⛔ این فرمان فقط برای مدیر بات قابل دسترسی است.";
 
 const topicFa  = (t) => (TOPICS.find(x=>x[0]===t)||[,t])[1];
 const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
@@ -143,9 +143,16 @@ function pickIndex(){
   crypto.getRandomValues(b);
   return b[0] % CONTENT.length;
 }
-function isAllowed(chatId){
-  if(ALLOWED_USERS.length===0) return true;
-  return ALLOWED_USERS.includes(chatId);
+
+// ── چک دسترسی (Whitelist)
+function isAllowed(chatId, allowedUsers){
+  if(allowedUsers.length===0) return true; // اگر لیست خالی بود، همه مجازند (فاز تولید)
+  return allowedUsers.includes(chatId);
+}
+
+// ── چک ادمین (فقط کاربران در لیست ALLOWED_USERS)
+function isAdmin(chatId, allowedUsers){
+  return allowedUsers.includes(chatId);
 }
 
 // ── پخش همگانی
@@ -198,10 +205,11 @@ async function listMembers(env){
 }
 
 // ── handler پیام
-async function onMessage(m, env){
+async function onMessage(m, env, allowedUsers){
   const chat=m.chat.id, text=(m.text||"").trim();
 
-  if(!isAllowed(chat)) return sendMessage(chat, PRIVATE_MSG, mainKb);
+  // ── لایه ۱: چک دسترسی (حالت خصوصی)
+  if(!isAllowed(chat, allowedUsers)) return sendMessage(chat, PRIVATE_MSG, mainKb);
 
   // ── /start + ذخیره نام
   if(text==="/start"){
@@ -214,22 +222,26 @@ async function onMessage(m, env){
     return sendMessage(chat, WELCOME, mainKb);
   }
 
-  // ── فرمان‌های ادمین
+  // ── لایه ۲: فرامین ادمین (فقط برای ادمین)
   if(text==="/cancel"){
+    if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
     await env.KV.delete("await:"+chat);
     return sendMessage(chat,"↩️ لغو شد.");
   }
   if(text==="/notify"){
+    if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
     await env.KV.put("await:"+chat, JSON.stringify({mode:"broadcast"}), {expirationTtl:300});
     return sendMessage(chat,"📣 متن نوتیفیکیشن را بفرست تا برای همهٔ اعضا ارسال شود.\nلغو: /cancel");
   }
   const mSend = text.match(/^\/send\s+([0-9,]+)\s*$/);
   if(mSend){
+    if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
     const ids = mSend[1].split(",").map(s=>parseInt(s,10)).filter(n=>!isNaN(n));
     await env.KV.put("await:"+chat, JSON.stringify({mode:"send", ids}), {expirationTtl:300});
     return sendMessage(chat,"📨 متن را بفرست تا به "+toFa(ids.length)+" نفر ارسال شود.\nلغو: /cancel");
   }
   if(text==="/members"){
+    if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
     const members = await listMembers(env);
     let lines = ["👥 اعضای بات: "+toFa(members.length),""];
     members.slice(0,50).forEach((mm,i)=>{
@@ -288,10 +300,13 @@ async function onSuccessfulPayment(m, env){
 }
 
 // ── callback
-async function onCallback(cq, env){
+async function onCallback(cq, env, allowedUsers){
   const chat=cq.message.chat.id, data=cq.data||"";
   await answerCallback(cq.id);
-  if(!isAllowed(chat)) return sendMessage(chat, PRIVATE_MSG, mainKb);
+  
+  // ── لایه ۱: چک دسترسی (حالت خصوصی)
+  if(!isAllowed(chat, allowedUsers)) return sendMessage(chat, PRIVATE_MSG, mainKb);
+  
   const {u, exists} = await getUser(env, chat);
 
   if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);
@@ -333,15 +348,23 @@ export default {
   async fetch(request, env){
     TOKEN = env.BOT_TOKEN || "";
     WALLET_TOKEN = env.WALLET_TOKEN || "WALLET-TEST-1111111111111111";
+    
+    // بارگذاری لیست کاربران مجاز از Environment Variable
     const allowedStr = env.ALLOWED_USERS || "";
-    ALLOWED_USERS = allowedStr ? allowedStr.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n)) : [];
+    const allowedUsers = allowedStr 
+      ? allowedStr.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n)) 
+      : [];
 
     if(request.method==="GET"){
       const url=new URL(request.url);
       if(url.pathname==="/test"){
-        const out={ hasToken:!!env.BOT_TOKEN, hasKV:!!env.KV, records:CONTENT.length,
+        const out={ 
+          hasToken:!!env.BOT_TOKEN, 
+          hasKV:!!env.KV, 
+          records:CONTENT.length, 
           wallet: WALLET_TOKEN.startsWith("WALLET-TEST")?"test":"real",
-          privateMode: ALLOWED_USERS.length>0 ? ALLOWED_USERS.length+" users allowed" : "public" };
+          privateMode: allowedUsers.length>0 ? allowedUsers.length+" users allowed" : "public (all users)"
+        };
         return new Response(JSON.stringify(out,null,2),{headers:{"Content-Type":"application/json"}});
       }
       return new Response("ok");
@@ -351,8 +374,8 @@ export default {
         const u = await request.json();
         if(u.pre_checkout_query) await onPreCheckout(u.pre_checkout_query);
         else if(u.message && u.message.successful_payment) await onSuccessfulPayment(u.message, env);
-        else if(u.message) await onMessage(u.message, env);
-        else if(u.callback_query) await onCallback(u.callback_query, env);
+        else if(u.message) await onMessage(u.message, env, allowedUsers);
+        else if(u.callback_query) await onCallback(u.callback_query, env, allowedUsers);
       }catch(e){ console.error(e); }
     }
     return new Response("ok");
