@@ -1,8 +1,9 @@
-// ── neshandel-bot — نسخه ۸: فروشگاه + پرداخت کیف‌پولی بله
+// ── neshandel-bot — نسخه ۹: حالت خصوصی (فقط کاربران مجاز)
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
 let WALLET_TOKEN = "";
+let ALLOWED_USERS = [];
 const BASE = "https://tapi.bale.ai";
 
 // ── API بله
@@ -61,6 +62,7 @@ const resultKb = (t)=>({ inline_keyboard:[
 // ── پیام‌ها
 const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
 const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
+const PRIVATE_MSG = "🔒 این بات در حال تست خصوصی است.\n\nفعلاً فقط کاربران منتخب می‌توانند از آن استفاده کنند.\n\nبه‌زودی برای همه فعال می‌شود. 🌿";
 
 const topicFa  = (t) => (TOPICS.find(x=>x[0]===t)||[,t])[1];
 const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
@@ -144,9 +146,21 @@ function pickIndex(){
   return b[0] % CONTENT.length;
 }
 
+// ── چک دسترسی (Whitelist)
+function isAllowed(chatId){
+  if(ALLOWED_USERS.length===0) return true; // اگر لیست خالی بود، همه مجازند (فاز تولید)
+  return ALLOWED_USERS.includes(chatId);
+}
+
 // ── handler ها
 async function onMessage(m, env){
   const chat=m.chat.id, text=(m.text||"").trim();
+  
+  // چک دسترسی
+  if(!isAllowed(chat)){
+    return sendMessage(chat, PRIVATE_MSG, mainKb);
+  }
+  
   if(text==="/start") return sendMessage(chat, WELCOME, mainKb);
   if(text==="🔮 استخاره") return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
   if(text==="👤 حساب من"){
@@ -161,14 +175,13 @@ async function onMessage(m, env){
   return sendMessage(chat,"برای شروع، «🔮 استخاره» را بزن.",mainKb);
 }
 
-// ── پرداخت: تأیید قبل از نهایی‌شدن (باید زیر ۱۰ ثانیه جواب بده)
+// ── پرداخت
 async function onPreCheckout(pcq){
   const pack = PACKS.find(p=>p.id===pcq.invoice_payload);
   if(!pack) return answerPreCheckout(pcq.id, false, "بستهٔ نامعتبر است.");
   return answerPreCheckout(pcq.id, true);
 }
 
-// ── پرداخت: پس از موفقیت، اعتبار اضافه کن
 async function onSuccessfulPayment(m, env){
   const chat=m.chat.id, sp=m.successful_payment;
   const pack = PACKS.find(p=>p.id===sp.invoice_payload);
@@ -176,7 +189,7 @@ async function onSuccessfulPayment(m, env){
   const txId = sp.telegram_payment_charge_id;
   try {
     const done = await env.KV.get("tx:"+txId);
-    if(done) return; // جلوگیری از شارژ دوباره
+    if(done) return;
   } catch(e){}
   const {u} = await getUser(env, chat);
   u.credits += pack.credits + pack.bonus;
@@ -189,6 +202,12 @@ async function onSuccessfulPayment(m, env){
 async function onCallback(cq, env){
   const chat=cq.message.chat.id, data=cq.data||"";
   await answerCallback(cq.id);
+  
+  // چک دسترسی
+  if(!isAllowed(chat)){
+    return sendMessage(chat, PRIVATE_MSG, mainKb);
+  }
+  
   const {u, exists} = await getUser(env, chat);
 
   if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);
@@ -234,11 +253,26 @@ async function onCallback(cq, env){
 export default {
   async fetch(request, env){
     TOKEN = env.BOT_TOKEN || "";
-    WALLET_TOKEN = env.WALLET_TOKEN || "WALLET-TEST-1111111111111111"; // تا وقتی توکن واقعی نگرفتی، تست
+    WALLET_TOKEN = env.WALLET_TOKEN || "WALLET-TEST-1111111111111111";
+    
+    // بارگذاری لیست کاربران مجاز از Environment Variable
+    const allowedStr = env.ALLOWED_USERS || "";
+    if(allowedStr){
+      ALLOWED_USERS = allowedStr.split(",").map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
+    } else {
+      ALLOWED_USERS = [];
+    }
+    
     if(request.method==="GET"){
       const url=new URL(request.url);
       if(url.pathname==="/test"){
-        const out={ hasToken:!!env.BOT_TOKEN, hasKV:!!env.KV, records:CONTENT.length, wallet: WALLET_TOKEN.startsWith("WALLET-TEST")?"test":"real" };
+        const out={ 
+          hasToken:!!env.BOT_TOKEN, 
+          hasKV:!!env.KV, 
+          records:CONTENT.length, 
+          wallet: WALLET_TOKEN.startsWith("WALLET-TEST")?"test":"real",
+          privateMode: ALLOWED_USERS.length>0 ? ALLOWED_USERS.length+" users allowed" : "public (all users)"
+        };
         return new Response(JSON.stringify(out,null,2),{headers:{"Content-Type":"application/json"}});
       }
       return new Response("ok");
