@@ -1,7 +1,8 @@
-// ── neshandel-bot — نسخه ۷: حداقلِ ممکنِ write روی KV + لحن v4
+// ── neshandel-bot — نسخه ۸: فروشگاه + پرداخت کیف‌پولی بله
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
+let WALLET_TOKEN = "";
 const BASE = "https://tapi.bale.ai";
 
 // ── API بله
@@ -13,6 +14,24 @@ async function baleCall(method, payload){
 const sendMessage = (chat_id, text, reply_markup) =>
   baleCall("sendMessage", { chat_id, text, parse_mode:"HTML", reply_markup });
 const answerCallback = (id) => baleCall("answerCallbackQuery", { callback_query_id: id });
+const sendInvoice = (chat_id, pack) => baleCall("sendInvoice", {
+  chat_id,
+  title: pack.title,
+  description: pack.desc,
+  payload: pack.id,
+  provider_token: WALLET_TOKEN,
+  prices: [{ label: pack.label, amount: pack.rials }]
+});
+const answerPreCheckout = (id, ok, error_message) =>
+  baleCall("answerPreCheckoutQuery", { pre_checkout_query_id:id, ok, ...(error_message?{error_message}:{}) });
+
+// ── بسته‌های فروشگاه (مبلغ به ریال)
+const PACKS = [
+  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",   label:"۱۰ اعتبار",   desc:"۱۰ اعتبار — باز کردن ۱۰ برداشت تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰٬۰۰۰ تومان" },
+  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",   label:"۳۵ اعتبار",   desc:"۳۰ اعتبار + ۵ هدیه",                text:"🥈 ۳۵ اعتبار — ۵۰٬۰۰۰ تومان" },
+  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار",  label:"۱۲۰ اعتبار",  desc:"۱۰۰ اعتبار + ۲۰ هدیه",              text:"🥇 ۱۲۰ اعتبار — ۱۵۰٬۰۰۰ تومان" },
+];
+const storeKb = { inline_keyboard: PACKS.map(p=>[{ text:p.text, callback_data:"buy:"+p.id }]) };
 
 // ── کیبوردها
 const TOPICS = [
@@ -106,7 +125,7 @@ function unlockMsg(r,t){
   ].join("\n");
 }
 
-// ── KV: خواندن همیشه؛ نوشتن فقط وقتی واقعاً لازم است
+// ── KV
 async function getUser(env, chatId){
   try {
     const raw = await env.KV.get("u:"+chatId);
@@ -119,19 +138,16 @@ async function saveUser(env, chatId, u){
   catch(e){ console.error("saveUser:", e); }
 }
 
-// ── قرعه‌کشی کاملاً تصادفی و یکنواخت
 function pickIndex(){
   const b = new Uint32Array(1);
   crypto.getRandomValues(b);
   return b[0] % CONTENT.length;
 }
 
-// ── handler ها (مسیرهای خواندنی = صفر write)
+// ── handler ها
 async function onMessage(m, env){
   const chat=m.chat.id, text=(m.text||"").trim();
-  if(text==="/start"){
-    return sendMessage(chat, WELCOME, mainKb);            // ← صفر write
-  }
+  if(text==="/start") return sendMessage(chat, WELCOME, mainKb);
   if(text==="🔮 استخاره") return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
   if(text==="👤 حساب من"){
     const {u} = await getUser(env, chat);
@@ -140,8 +156,34 @@ async function onMessage(m, env){
       "\n🔮 استخاره‌ها: "+toFa(u.draws)+
       "\n🔓 باز شده: "+toFa(u.unlocks), mainKb);
   }
-  if(text==="🛍 فروشگاه") return sendMessage(chat,"🛍 <b>فروشگاه</b>\n\nپرداخت واقعی به‌زودی فعال می‌شود.",mainKb);
+  if(text==="🛍 فروشگاه") return sendMessage(chat,
+    "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = باز کردن یک برداشت تخصصی و چک‌لیست تصمیم\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاد:", storeKb);
   return sendMessage(chat,"برای شروع، «🔮 استخاره» را بزن.",mainKb);
+}
+
+// ── پرداخت: تأیید قبل از نهایی‌شدن (باید زیر ۱۰ ثانیه جواب بده)
+async function onPreCheckout(pcq){
+  const pack = PACKS.find(p=>p.id===pcq.invoice_payload);
+  if(!pack) return answerPreCheckout(pcq.id, false, "بستهٔ نامعتبر است.");
+  return answerPreCheckout(pcq.id, true);
+}
+
+// ── پرداخت: پس از موفقیت، اعتبار اضافه کن
+async function onSuccessfulPayment(m, env){
+  const chat=m.chat.id, sp=m.successful_payment;
+  const pack = PACKS.find(p=>p.id===sp.invoice_payload);
+  if(!pack) return;
+  const txId = sp.telegram_payment_charge_id;
+  try {
+    const done = await env.KV.get("tx:"+txId);
+    if(done) return; // جلوگیری از شارژ دوباره
+  } catch(e){}
+  const {u} = await getUser(env, chat);
+  u.credits += pack.credits + pack.bonus;
+  await saveUser(env, chat, u);
+  try { await env.KV.put("tx:"+txId, JSON.stringify({pack:pack.id, chat, at:Date.now()})); } catch(e){}
+  return sendMessage(chat,
+    "🎉 پرداخت موفق!\n\n💎 "+toFa(pack.credits+pack.bonus)+" اعتبار به حساب تو اضافه شد.\nاعتبار فعلی: "+toFa(u.credits), mainKb);
 }
 
 async function onCallback(cq, env){
@@ -149,12 +191,18 @@ async function onCallback(cq, env){
   await answerCallback(cq.id);
   const {u, exists} = await getUser(env, chat);
 
-  if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);          // ← صفر write
-  if(data==="new")   return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb); // ← صفر write
+  if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);
+  if(data==="new")   return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
+
+  if(data.startsWith("buy:")){
+    const pack = PACKS.find(p=>p.id===data.slice(4));
+    if(!pack) return sendMessage(chat,"⚠️ بسته پیدا نشد.",mainKb);
+    return sendInvoice(chat, pack);
+  }
 
   if(data.startsWith("topic:")){
     const t = data.slice(6);
-    if(exists && u.topic !== t){ u.topic = t; await saveUser(env,chat,u); }   // ← write فقط اگر عوض شد
+    if(exists && u.topic !== t){ u.topic = t; await saveUser(env,chat,u); }
     return sendMessage(chat, RITUAL, ritualKb(t));
   }
 
@@ -163,7 +211,7 @@ async function onCallback(cq, env){
     u.topic = t;
     u.last = pickIndex();
     u.draws += 1;
-    await saveUser(env,chat,u);   // ← write ضروری (ثبت قرعه)
+    await saveUser(env,chat,u);
     await sendMessage(chat,"🔮 در حال انجام استخاره...");
     return sendMessage(chat, freeMsg(CONTENT[u.last], t), resultKb(t));
   }
@@ -173,25 +221,24 @@ async function onCallback(cq, env){
     const rec = CONTENT[u.last];
     if(!rec) return sendMessage(chat,"⚠️ خطای کوچک؛ لطفاً یک استخارهٔ جدید بگیر.",mainKb);
     const key = u.last+":"+t;
-    if(u.unlocked.includes(key)){
-      return sendMessage(chat, unlockMsg(rec, t), mainKb);   // ← صفر write
-    }
+    if(u.unlocked.includes(key)) return sendMessage(chat, unlockMsg(rec, t), mainKb);
     if(u.credits>0){
       u.credits -= 1; u.unlocks += 1; u.unlocked.push(key);
-      await saveUser(env,chat,u);   // ← write ضروری (کسر اعتبار)
+      await saveUser(env,chat,u);
       return sendMessage(chat, unlockMsg(rec, t), mainKb);
     }
-    return sendMessage(chat,"💎 اعتبار کافی نیست.\n\nبه‌زودی می‌توانی از فروشگاه اعتبار بخری.",mainKb);
+    return sendMessage(chat,"💎 اعتبار کافی نیست.\n\nاز «🛍 فروشگاه» یه بسته بخر:", storeKb);
   }
 }
 
 export default {
   async fetch(request, env){
     TOKEN = env.BOT_TOKEN || "";
+    WALLET_TOKEN = env.WALLET_TOKEN || "WALLET-TEST-1111111111111111"; // تا وقتی توکن واقعی نگرفتی، تست
     if(request.method==="GET"){
       const url=new URL(request.url);
       if(url.pathname==="/test"){
-        const out={ hasToken: !!env.BOT_TOKEN, hasKV: !!env.KV, records: CONTENT.length };
+        const out={ hasToken:!!env.BOT_TOKEN, hasKV:!!env.KV, records:CONTENT.length, wallet: WALLET_TOKEN.startsWith("WALLET-TEST")?"test":"real" };
         return new Response(JSON.stringify(out,null,2),{headers:{"Content-Type":"application/json"}});
       }
       return new Response("ok");
@@ -199,7 +246,9 @@ export default {
     if(request.method==="POST"){
       try{
         const u = await request.json();
-        if(u.message) await onMessage(u.message, env);
+        if(u.pre_checkout_query) await onPreCheckout(u.pre_checkout_query);
+        else if(u.message && u.message.successful_payment) await onSuccessfulPayment(u.message, env);
+        else if(u.message) await onMessage(u.message, env);
         else if(u.callback_query) await onCallback(u.callback_query, env);
       }catch(e){ console.error(e); }
     }
