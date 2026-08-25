@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۹: حالت خصوصی (فقط کاربران مجاز)
+// ── neshandel-bot — نسخه ۱۰: پخش (تکی/چندتایی/همگانی) + لیست اعضا
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -14,23 +14,21 @@ async function baleCall(method, payload){
 }
 const sendMessage = (chat_id, text, reply_markup) =>
   baleCall("sendMessage", { chat_id, text, parse_mode:"HTML", reply_markup });
+const sendPlain = (chat_id, text, reply_markup) =>
+  baleCall("sendMessage", { chat_id, text, reply_markup });
 const answerCallback = (id) => baleCall("answerCallbackQuery", { callback_query_id: id });
 const sendInvoice = (chat_id, pack) => baleCall("sendInvoice", {
-  chat_id,
-  title: pack.title,
-  description: pack.desc,
-  payload: pack.id,
-  provider_token: WALLET_TOKEN,
-  prices: [{ label: pack.label, amount: pack.rials }]
+  chat_id, title: pack.title, description: pack.desc, payload: pack.id,
+  provider_token: WALLET_TOKEN, prices: [{ label: pack.label, amount: pack.rials }]
 });
 const answerPreCheckout = (id, ok, error_message) =>
   baleCall("answerPreCheckoutQuery", { pre_checkout_query_id:id, ok, ...(error_message?{error_message}:{}) });
 
-// ── بسته‌های فروشگاه (مبلغ به ریال)
+// ── بسته‌ها
 const PACKS = [
-  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",   label:"۱۰ اعتبار",   desc:"۱۰ اعتبار — باز کردن ۱۰ برداشت تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰٬۰۰۰ تومان" },
-  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",   label:"۳۵ اعتبار",   desc:"۳۰ اعتبار + ۵ هدیه",                text:"🥈 ۳۵ اعتبار — ۵۰٬۰۰۰ تومان" },
-  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار",  label:"۱۲۰ اعتبار",  desc:"۱۰۰ اعتبار + ۲۰ هدیه",              text:"🥇 ۱۲۰ اعتبار — ۱۵۰٬۰۰۰ تومان" },
+  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — باز کردن ۱۰ برداشت تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰۰۰۰ تومان" },
+  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",  label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",               text:"🥈 ۳۵ اعتبار — ۵۰۰۰۰ تومان" },
+  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",             text:"🥇 ۱۲۰ اعتبار — ۱۵۰٬۰۰۰ تومان" },
 ];
 const storeKb = { inline_keyboard: PACKS.map(p=>[{ text:p.text, callback_data:"buy:"+p.id }]) };
 
@@ -46,7 +44,7 @@ const topicKb = { inline_keyboard:[
   [ {text:"❤️ ازدواج",callback_data:"topic:marriage"},{text:"💰 معامله",callback_data:"topic:transaction"} ],
   [ {text:"💼 کار",callback_data:"topic:work"},{text:"🏠 خانه",callback_data:"topic:home"} ],
   [ {text:"🚗 خودرو",callback_data:"topic:car"},{text:"✈️ سفر",callback_data:"topic:travel"} ],
-  [ {text:"📚 تحصیل",callback_data:"topic:study"},{text:"❓ تصمیم دیگر",callback_data:"topic:other"} ]
+  [ {text:"📚 تحصیل",callback_data:"topic:study"},{text:"❔ تصمیم دیگر",callback_data:"topic:other"} ]
 ]};
 const ritualKb = (t)=>({ inline_keyboard:[
   [{text:"🤲 خواندم، استخاره کن",callback_data:"draw:"+t}],
@@ -133,7 +131,7 @@ async function getUser(env, chatId){
     const raw = await env.KV.get("u:"+chatId);
     if (raw) return { u: JSON.parse(raw), exists: true };
   } catch(e){ console.error("getUser:", e); }
-  return { u: { credits:2, draws:0, unlocks:0, last:-1, topic:"marriage", unlocked:[] }, exists: false };
+  return { u: { credits:2, draws:0, unlocks:0, last:-1, topic:"marriage", unlocked:[], name:"" }, exists: false };
 }
 async function saveUser(env, chatId, u){
   try { await env.KV.put("u:"+chatId, JSON.stringify(u)); }
@@ -145,23 +143,117 @@ function pickIndex(){
   crypto.getRandomValues(b);
   return b[0] % CONTENT.length;
 }
-
-// ── چک دسترسی (Whitelist)
 function isAllowed(chatId){
-  if(ALLOWED_USERS.length===0) return true; // اگر لیست خالی بود، همه مجازند (فاز تولید)
+  if(ALLOWED_USERS.length===0) return true;
   return ALLOWED_USERS.includes(chatId);
 }
 
-// ── handler ها
+// ── پخش همگانی
+async function broadcast(env, text){
+  let cursor, sent=0, failed=0;
+  for(;;){
+    const page = await env.KV.list({prefix:"u:", cursor});
+    for(const k of page.keys){
+      const id = parseInt(k.name.slice(2),10);
+      if(isNaN(id)) continue;
+      const r = await baleCall("sendMessage",{chat_id:id, text});
+      if(r && r.ok) sent++; else failed++;
+    }
+    if(page.list_complete) break;
+    cursor = page.cursor;
+  }
+  return {sent, failed};
+}
+
+// ── ارسال به لیست مشخص
+async function sendToMany(env, ids, text){
+  let sent=0, failed=0;
+  for(const id of ids){
+    const r = await baleCall("sendMessage",{chat_id:id, text});
+    if(r && r.ok) sent++; else failed++;
+  }
+  return {sent, failed};
+}
+
+// ── لیست اعضا
+async function listMembers(env){
+  const members=[];
+  let cursor;
+  for(;;){
+    const page = await env.KV.list({prefix:"u:", cursor});
+    for(const k of page.keys){
+      const id = parseInt(k.name.slice(2),10);
+      if(isNaN(id)) continue;
+      let name="", credits=0;
+      try{
+        const raw = await env.KV.get(k.name);
+        if(raw){ const u=JSON.parse(raw); name=u.name||""; credits=u.credits||0; }
+      }catch(e){}
+      members.push({id, name, credits});
+    }
+    if(page.list_complete) break;
+    cursor = page.cursor;
+  }
+  return members;
+}
+
+// ── handler پیام
 async function onMessage(m, env){
   const chat=m.chat.id, text=(m.text||"").trim();
-  
-  // چک دسترسی
-  if(!isAllowed(chat)){
-    return sendMessage(chat, PRIVATE_MSG, mainKb);
+
+  if(!isAllowed(chat)) return sendMessage(chat, PRIVATE_MSG, mainKb);
+
+  // ── /start + ذخیره نام
+  if(text==="/start"){
+    const cleanName = ((m.chat.first_name||"")+" "+(m.chat.last_name||"")).trim();
+    const {u, exists} = await getUser(env, chat);
+    if(!exists || (cleanName && u.name!==cleanName)){
+      u.name = cleanName || u.name || "";
+      await saveUser(env, chat, u);
+    }
+    return sendMessage(chat, WELCOME, mainKb);
   }
-  
-  if(text==="/start") return sendMessage(chat, WELCOME, mainKb);
+
+  // ── فرمان‌های ادمین
+  if(text==="/cancel"){
+    await env.KV.delete("await:"+chat);
+    return sendMessage(chat,"↩️ لغو شد.");
+  }
+  if(text==="/notify"){
+    await env.KV.put("await:"+chat, JSON.stringify({mode:"broadcast"}), {expirationTtl:300});
+    return sendMessage(chat,"📣 متن نوتیفیکیشن را بفرست تا برای همهٔ اعضا ارسال شود.\nلغو: /cancel");
+  }
+  const mSend = text.match(/^\/send\s+([0-9,]+)\s*$/);
+  if(mSend){
+    const ids = mSend[1].split(",").map(s=>parseInt(s,10)).filter(n=>!isNaN(n));
+    await env.KV.put("await:"+chat, JSON.stringify({mode:"send", ids}), {expirationTtl:300});
+    return sendMessage(chat,"📨 متن را بفرست تا به "+toFa(ids.length)+" نفر ارسال شود.\nلغو: /cancel");
+  }
+  if(text==="/members"){
+    const members = await listMembers(env);
+    let lines = ["👥 اعضای بات: "+toFa(members.length),""];
+    members.slice(0,50).forEach((mm,i)=>{
+      lines.push(toFa(i+1)+". "+(mm.name||"بدون نام")+" — "+mm.id+" (💎"+toFa(mm.credits)+")");
+    });
+    if(members.length>50) lines.push("… و "+toFa(members.length-50)+" عضو دیگر");
+    return sendPlain(chat, lines.join("\n"), mainKb);
+  }
+
+  // ── حالت انتظار (پخش/ارسال)
+  const awaitingRaw = await env.KV.get("await:"+chat);
+  if(awaitingRaw){
+    let awaiting; try{ awaiting=JSON.parse(awaitingRaw);}catch(e){ awaiting={mode:"broadcast"}; }
+    await env.KV.delete("await:"+chat);
+    if(awaiting.mode==="send"){
+      const res = await sendToMany(env, awaiting.ids, text);
+      return sendMessage(chat,"📨 ارسال شد.\n✅ موفق: "+toFa(res.sent)+"\n⚠️ ناموفق: "+toFa(res.failed));
+    } else {
+      const res = await broadcast(env, text);
+      return sendMessage(chat,"📣 پخش شد.\n✅ موفق: "+toFa(res.sent)+"\n⚠️ ناموفق: "+toFa(res.failed));
+    }
+  }
+
+  // ── منوی عادی
   if(text==="🔮 استخاره") return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
   if(text==="👤 حساب من"){
     const {u} = await getUser(env, chat);
@@ -181,16 +273,12 @@ async function onPreCheckout(pcq){
   if(!pack) return answerPreCheckout(pcq.id, false, "بستهٔ نامعتبر است.");
   return answerPreCheckout(pcq.id, true);
 }
-
 async function onSuccessfulPayment(m, env){
   const chat=m.chat.id, sp=m.successful_payment;
   const pack = PACKS.find(p=>p.id===sp.invoice_payload);
   if(!pack) return;
   const txId = sp.telegram_payment_charge_id;
-  try {
-    const done = await env.KV.get("tx:"+txId);
-    if(done) return;
-  } catch(e){}
+  try { const done = await env.KV.get("tx:"+txId); if(done) return; } catch(e){}
   const {u} = await getUser(env, chat);
   u.credits += pack.credits + pack.bonus;
   await saveUser(env, chat, u);
@@ -199,15 +287,11 @@ async function onSuccessfulPayment(m, env){
     "🎉 پرداخت موفق!\n\n💎 "+toFa(pack.credits+pack.bonus)+" اعتبار به حساب تو اضافه شد.\nاعتبار فعلی: "+toFa(u.credits), mainKb);
 }
 
+// ── callback
 async function onCallback(cq, env){
   const chat=cq.message.chat.id, data=cq.data||"";
   await answerCallback(cq.id);
-  
-  // چک دسترسی
-  if(!isAllowed(chat)){
-    return sendMessage(chat, PRIVATE_MSG, mainKb);
-  }
-  
+  if(!isAllowed(chat)) return sendMessage(chat, PRIVATE_MSG, mainKb);
   const {u, exists} = await getUser(env, chat);
 
   if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);
@@ -218,23 +302,18 @@ async function onCallback(cq, env){
     if(!pack) return sendMessage(chat,"⚠️ بسته پیدا نشد.",mainKb);
     return sendInvoice(chat, pack);
   }
-
   if(data.startsWith("topic:")){
     const t = data.slice(6);
     if(exists && u.topic !== t){ u.topic = t; await saveUser(env,chat,u); }
     return sendMessage(chat, RITUAL, ritualKb(t));
   }
-
   if(data.startsWith("draw:")){
     const t = data.slice(5);
-    u.topic = t;
-    u.last = pickIndex();
-    u.draws += 1;
+    u.topic = t; u.last = pickIndex(); u.draws += 1;
     await saveUser(env,chat,u);
     await sendMessage(chat,"🔮 در حال انجام استخاره...");
     return sendMessage(chat, freeMsg(CONTENT[u.last], t), resultKb(t));
   }
-
   if(data.startsWith("unlock:")){
     const t = data.slice(7);
     const rec = CONTENT[u.last];
@@ -254,25 +333,15 @@ export default {
   async fetch(request, env){
     TOKEN = env.BOT_TOKEN || "";
     WALLET_TOKEN = env.WALLET_TOKEN || "WALLET-TEST-1111111111111111";
-    
-    // بارگذاری لیست کاربران مجاز از Environment Variable
     const allowedStr = env.ALLOWED_USERS || "";
-    if(allowedStr){
-      ALLOWED_USERS = allowedStr.split(",").map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
-    } else {
-      ALLOWED_USERS = [];
-    }
-    
+    ALLOWED_USERS = allowedStr ? allowedStr.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n)) : [];
+
     if(request.method==="GET"){
       const url=new URL(request.url);
       if(url.pathname==="/test"){
-        const out={ 
-          hasToken:!!env.BOT_TOKEN, 
-          hasKV:!!env.KV, 
-          records:CONTENT.length, 
+        const out={ hasToken:!!env.BOT_TOKEN, hasKV:!!env.KV, records:CONTENT.length,
           wallet: WALLET_TOKEN.startsWith("WALLET-TEST")?"test":"real",
-          privateMode: ALLOWED_USERS.length>0 ? ALLOWED_USERS.length+" users allowed" : "public (all users)"
-        };
+          privateMode: ALLOWED_USERS.length>0 ? ALLOWED_USERS.length+" users allowed" : "public" };
         return new Response(JSON.stringify(out,null,2),{headers:{"Content-Type":"application/json"}});
       }
       return new Response("ok");
