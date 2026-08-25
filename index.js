@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۱۱: امنیت چندلایه + حالت خصوصی
+// ── neshandel-bot — نسخه ۱۲: اطلاعات تکمیلی اعضا + امنیت چندلایه
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -131,7 +131,7 @@ async function getUser(env, chatId){
     const raw = await env.KV.get("u:"+chatId);
     if (raw) return { u: JSON.parse(raw), exists: true };
   } catch(e){ console.error("getUser:", e); }
-  return { u: { credits:2, draws:0, unlocks:0, last:-1, topic:"marriage", unlocked:[], name:"" }, exists: false };
+  return { u: { credits:2, draws:0, unlocks:0, last:-1, topic:"marriage", unlocked:[], name:"", joined:0 }, exists: false };
 }
 async function saveUser(env, chatId, u){
   try { await env.KV.put("u:"+chatId, JSON.stringify(u)); }
@@ -182,7 +182,7 @@ async function sendToMany(env, ids, text){
   return {sent, failed};
 }
 
-// ── لیست اعضا
+// ── لیست اعضا (نسخه پرجزئیات)
 async function listMembers(env){
   const members=[];
   let cursor;
@@ -191,12 +191,16 @@ async function listMembers(env){
     for(const k of page.keys){
       const id = parseInt(k.name.slice(2),10);
       if(isNaN(id)) continue;
-      let name="", credits=0;
-      try{
-        const raw = await env.KV.get(k.name);
-        if(raw){ const u=JSON.parse(raw); name=u.name||""; credits=u.credits||0; }
-      }catch(e){}
-      members.push({id, name, credits});
+      let u={};
+      try{ const raw=await env.KV.get(k.name); if(raw) u=JSON.parse(raw); }catch(e){}
+      members.push({
+        id,
+        name: u.name||"",
+        credits: u.credits||0,
+        draws: u.draws||0,
+        unlocks: u.unlocks||0,
+        joined: u.joined||0
+      });
     }
     if(page.list_complete) break;
     cursor = page.cursor;
@@ -211,14 +215,14 @@ async function onMessage(m, env, allowedUsers){
   // ── لایه ۱: چک دسترسی (حالت خصوصی)
   if(!isAllowed(chat, allowedUsers)) return sendMessage(chat, PRIVATE_MSG, mainKb);
 
-  // ── /start + ذخیره نام
+  // ── /start + ذخیره نام و تاریخ عضویت
   if(text==="/start"){
     const cleanName = ((m.chat.first_name||"")+" "+(m.chat.last_name||"")).trim();
     const {u, exists} = await getUser(env, chat);
-    if(!exists || (cleanName && u.name!==cleanName)){
-      u.name = cleanName || u.name || "";
-      await saveUser(env, chat, u);
-    }
+    let save = !exists;
+    if(!u.joined) { u.joined = Date.now(); save = true; }
+    if(cleanName && u.name !== cleanName) { u.name = cleanName; save = true; }
+    if(save) await saveUser(env, chat, u);
     return sendMessage(chat, WELCOME, mainKb);
   }
 
@@ -245,10 +249,16 @@ async function onMessage(m, env, allowedUsers){
     const members = await listMembers(env);
     let lines = ["👥 اعضای بات: "+toFa(members.length),""];
     members.slice(0,50).forEach((mm,i)=>{
-      lines.push(toFa(i+1)+". "+(mm.name||"بدون نام")+" — "+mm.id+" (💎"+toFa(mm.credits)+")");
+      const joined = mm.joined ? new Date(mm.joined).toLocaleDateString("fa-IR") : "—";
+      lines.push(
+        toFa(i+1)+". "+(mm.name||"بدون نام")+
+        "\n🆔 "+mm.id+
+        "\n💎 "+toFa(mm.credits)+" | 🔮 "+toFa(mm.draws)+" | 🔓 "+toFa(mm.unlocks)+
+        "\n📅 عضویت: "+joined
+      );
     });
     if(members.length>50) lines.push("… و "+toFa(members.length-50)+" عضو دیگر");
-    return sendPlain(chat, lines.join("\n"), mainKb);
+    return sendPlain(chat, lines.join("\n\n"), mainKb);
   }
 
   // ── حالت انتظار (پخش/ارسال)
