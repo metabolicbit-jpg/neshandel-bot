@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۱۳: منوی دسته‌بندی‌شدهٔ ۲۲ موضوعی + Schema v4 + بسته‌های نام‌دار
+// ── neshandel-bot — نسخه ۱۴: منوی ساده‌شده + بسته‌های مدال‌دار + Schema v4
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -23,11 +23,11 @@ const sendInvoice = (chat_id, pack) => baleCall("sendInvoice", {
 const answerPreCheckout = (id, ok, error_message) =>
   baleCall("answerPreCheckoutQuery", { pre_checkout_query_id:id, ok, ...(error_message?{error_message}:{}) });
 
-// ── بسته‌های فروشگاه (نام‌دار — تم نور/رشد)
+// ── بسته‌های فروشگاه (مدال‌دار — مطابق اسکرین‌شات)
 const PACKS = [
-  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ جوانه",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — ۱۰ استخارهٔ تخصصی", text:"🌱 بسته جوانه | ۱ اعتبار — ۲۰٬۰۰ تومان" },
-  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ماه",    label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",          text:"🌙 بستهٔ ماه | ۳۵ اعتبار — ۵۰٬۰۰ تومان" },
-  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ خورشید", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",        text:"☀️ بستهٔ خورشید | ۱۲ اعتبار — ۱۵۰٬۰۰۰ تومان" },
+  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — ۱۰ استخارهٔ تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰,۰۰۰ تومان" },
+  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",  label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",          text:"🥈 ۳۵ اعتبار — ۵۰,۰۰۰ تومان" },
+  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",        text:"🥇 ۱۲۰ اعتبار — ۱۵۰,۰۰۰ تومان" },
 ];
 const storeKb = { inline_keyboard: PACKS.map(p=>[{ text:p.text, callback_data:"buy:"+p.id }]) };
 
@@ -72,22 +72,36 @@ const CATEGORIES = [
 
 // ── کیبوردها
 const mainKb = { keyboard:[[ {text:"🔮 استخاره"} ],[ {text:"👤 حساب من"},{text:"🛍 فروشگاه"} ]], resize_keyboard:true, is_persistent:true };
+// آداب: فقط «خواندم» + «انصراف» (بدون آداب حذف شد)
 const ritualKb = (t)=>({ inline_keyboard:[
   [{text:"🤲 خواندم، استخاره کن",callback_data:"draw:"+t}],
-  [{text:"⏭ بدون آداب",callback_data:"draw:"+t}],
   [{text:"↩️ انصراف",callback_data:"home"}]
 ]});
+// نتیجه: دکمهٔ پریمیوم شخصی + استخاره جدید (منوی اصلی حذف شد)
+const resultKb = (t)=>({ inline_keyboard:[
+  [{text:premiumBtn(t),callback_data:"unlock:"+t}],
+  [{text:"🔮 استخاره جدید",callback_data:"new"}]
+]});
+// پس از باز کردن: بازبینی رایگان + استخاره جدید
+const unlockedKb = (t)=>({ inline_keyboard:[
+  [{text:"📖 مشاهدهٔ استخاره تخصصی",callback_data:"view:"+t}],
+  [{text:"🔮 استخاره جدید",callback_data:"new"}]
+]});
+// بدون اعتبار: فروشگاه + استخاره جدید
+const noCreditKb = { inline_keyboard:[
+  [{text:"🛍 مشاهدهٔ بسته‌ها",callback_data:"store"}],
+  [{text:"🔮 استخاره جدید",callback_data:"new"}]
+]};
 
-// منوی مرحلهٔ ۱: دسته‌ها (۲ستونه) + تصمیم دیگر
+// منوی مرحلهٔ ۱: فقط دسته‌ها (تصمیم دیگر حذف شد)
 function catKb(){
   const rows=[];
   for(let i=0;i<CATEGORIES.length;i+=2){
     rows.push(CATEGORIES.slice(i,i+2).map(c=>({text:c.label,callback_data:"cat:"+c.id})));
   }
-  rows.push([{text:"❓ تصمیم دیگر",callback_data:"topic:other"}]);
   return {inline_keyboard:rows};
 }
-// منوی مرحلهٔ ۲: موضوعات دسته (قانون: برچسب بلند = ردیف مستقل)
+// منوی مرحلهٔ ۲: موضوعات دسته + بازگشت (قانون: برچسب بلند = ردیف مستقل)
 function topicKb(catId){
   const cat = CATEGORIES.find(c=>c.id===catId);
   if(!cat) return catKb();
@@ -108,28 +122,13 @@ function premiumBtn(t){
   const txt="💎 استخاره تخصصی "+topicShort(t);
   return txt.length>30 ? "💎 استخاره تخصصی" : txt;
 }
-const resultKb = (t)=>({ inline_keyboard:[
-  [{text:premiumBtn(t),callback_data:"unlock:"+t}],
-  [{text:"🔮 استخاره جدید",callback_data:"new"}],
-  [{text:"🏠 منوی اصلی",callback_data:"home"}]
-]});
-const unlockedKb = (t)=>({ inline_keyboard:[
-  [{text:"📖 مشاهدهٔ استخاره تخصصی",callback_data:"view:"+t}],
-  [{text:"🔮 استخاره جدید",callback_data:"new"}],
-  [{text:"🏠 منوی اصلی",callback_data:"home"}]
-]});
-const noCreditKb = { inline_keyboard:[
-  [{text:"🛍 مشاهدهٔ بسته‌ها",callback_data:"store"}],
-  [{text:"🔮 استخاره جدید",callback_data:"new"}],
-  [{text:"🏠 منوی اصلی",callback_data:"home"}]
-]};
 
 // ── پیام‌ها
 const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
 const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
 const PRIVATE_MSG = "🔒 این بات در حال تست خصوصی است.\n\nفعلاً فقط کاربران منتخب می‌توانند از آن استفاده کنند.\n\nبه‌زودی برای همه فعال می‌شود. 🌿";
 const ADMIN_ONLY_MSG = "⛔ این فرمان فقط برای مدیر بات قابل دسترسی است.";
-const STORE_MSG = "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = یک استخارهٔ تخصصی با تحلیل کامل موضوع تو\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاید:";
+const STORE_MSG = "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = یک استخارهٔ تخصصی با تحلیل کامل موضوع تو\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاد:";
 const NO_CREDIT_MSG = "🌿 دوست عزیز، اعتبارت تموم شده.\n\nبرای دیدن استخارهٔ تخصصی همین موضوع، یکی از بسته‌ها رو انتخاب کن؛ کمتر از یک دقیقه شارژ می‌شه. 🌙";
 const DISCLAIMER = "⚖️ سلب مسئولیت و نکته مهم فقهی: فراموش نکنید که در احکام اسلامی، استخاره جایگزین عقل، تحقیق و مشورت نیست و «وحی منزل» محسوب نمی‌شود. این متن صرفاً یک تفسیر و راهنمای معنوی بر اساس آیات قرآن است. لذا برای تصمیمات حساس زندگی‌تان، حتماً در کنار این استخاره، با متخصصان و مشاوران کارآزمودهٔ آن حوزه مشورت فرمایید. 🤝";
 
@@ -138,7 +137,6 @@ const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
 // ── جست‌وجوی موضوع
 function topicInfo(id){
   for(const c of CATEGORIES) for(const t of c.topics) if(t.id===id) return t;
-  if(id==="other") return { id:"other", label:"❓ تصمیم دیگر", short:"تصمیم تو" };
   return { id, label:"❓ تصمیم دیگر", short:"تصمیم تو" };
 }
 function topicShort(id){ return topicInfo(id).short || "تصمیم تو"; }
@@ -170,7 +168,6 @@ function freeMsg(r,t){
       "(سورهٔ "+r.surah+"، آیهٔ "+toFa(r.ayah)+")"
     ].join("\n");
   }
-  // fallback (Schema v2/v3)
   const B=(r.topics||{})[t]||{verdict:r.verdict,guidance:r.key,action:r.action};
   return [
     r.badge+" <b>نتیجه:</b> "+r.verdict,
@@ -202,7 +199,6 @@ function premiumMsg(r,t){
       DISCLAIMER
     ].join("\n");
   }
-  // fallback قدیمی
   const T=(r.topics||{})[t]||{};
   if(r.premium){
     const P=r.premium;
@@ -400,13 +396,13 @@ async function onCallback(cq, env, allowedUsers){
   const {u, exists} = await getUser(env, chat);
 
   if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);
-  if(data==="new")   return sendMessage(chat,"📂 دسته موردنظرت رو انتخاب کن:",catKb());
+  if(data==="new")   return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
   if(data==="cats")  return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
   if(data==="store") return sendMessage(chat, STORE_MSG, storeKb);
 
   if(data.startsWith("cat:")){
     const cat = CATEGORIES.find(c=>c.id===data.slice(4));
-    if(!cat) return sendMessage(chat,"📂 دسته موردنظرت رو انتخاب کن:",catKb());
+    if(!cat) return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
     return sendMessage(chat,"📂 دستهٔ «"+cat.full+"» — موضوعت رو انتخاب کن:",topicKb(cat.id));
   }
 
