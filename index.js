@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۱۲: اطلاعات تکمیلی اعضا + امنیت چندلایه
+// ── neshandel-bot — نسخه ۱۳: منوی دسته‌بندی‌شدهٔ ۲۲ موضوعی + Schema v4 + بسته‌های نام‌دار
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -23,61 +23,155 @@ const sendInvoice = (chat_id, pack) => baleCall("sendInvoice", {
 const answerPreCheckout = (id, ok, error_message) =>
   baleCall("answerPreCheckoutQuery", { pre_checkout_query_id:id, ok, ...(error_message?{error_message}:{}) });
 
-// ── بسته‌ها
+// ── بسته‌های فروشگاه (نام‌دار — تم نور/رشد)
 const PACKS = [
-  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — باز کردن ۱۰ برداشت تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰٬۰۰۰ تومان" },
-  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",  label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",               text:"🥈 ۳۵ اعتبار — ۵۰٬۰۰۰ تومان" },
-  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",             text:"🥇 ۱۲۰ اعتبار — ۱۵۰٬۰۰۰ تومان" },
+  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ جوانه",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — ۱۰ استخارهٔ تخصصی", text:"🌱 بسته جوانه | ۱ اعتبار — ۲۰٬۰۰ تومان" },
+  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ماه",    label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",          text:"🌙 بستهٔ ماه | ۳۵ اعتبار — ۵۰٬۰۰ تومان" },
+  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ خورشید", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",        text:"☀️ بستهٔ خورشید | ۱۲ اعتبار — ۱۵۰٬۰۰۰ تومان" },
 ];
 const storeKb = { inline_keyboard: PACKS.map(p=>[{ text:p.text, callback_data:"buy:"+p.id }]) };
 
-// ── کیبوردها
-const TOPICS = [
-  ["marriage","❤️ ازدواج"],["transaction","💰 معامله"],
-  ["work","💼 کار"],["home","🏠 خانه"],
-  ["car","🚗 خودرو"],["travel","✈️ سفر"],
-  ["study","📚 تحصیل"],["other","❓ تصمیم دیگر"]
+// ── دسته‌بندی موضوعات (۲۲ موضوع) + فازبندی آینده‌نگر
+const CURRENT_PHASE = 1;
+const CATEGORIES = [
+  { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
+    { id:"marriage",   label:"🤵👰 ازدواج",   short:"ازدواج" },
+    { id:"proposal",   label:"💐 خواستگاری", short:"خواستگاری", phase:2 },
+    { id:"childbirth", label:"🤰 فرزندآوری", short:"فرزندآوری", phase:2 },
+    { id:"divorce",    label:"💔 طلاق",      short:"طلاق", hidden:true },
+    { id:"breakup",    label:"❌ فسخ",       short:"فسخ", hidden:true },
+    { id:"reconcile",  label:"🕊️ آشتی",     short:"آشتی", phase:2 },
+  ]},
+  { id:"business", label:"💼 کسب‌وکار", full:"شغل و کسب‌وکار", topics:[
+    { id:"work",        label:"💼 کار",       short:"کار" },
+    { id:"trade",       label:"💰 معامله",    short:"معامله" },
+    { id:"partnership", label:"🤝 شراکت",     short:"شراکت", phase:2 },
+    { id:"investment",  label:"📈 سرمایه‌گذاری", short:"سرمایه‌گذاری" },
+    { id:"resign",      label:"🚪 استعفا",    short:"استعفا", phase:2 },
+    { id:"business2",   label:"🏪 کسب شخصی", short:"کسب شخصی", phase:2, key:"business" },
+    { id:"legal",       label:"⚖️ حقوقی",    short:"حقوقی", phase:2 },
+    { id:"loan",        label:"💳 وام",       short:"وام", phase:2 },
+  ]},
+  { id:"asset", label:"🏠 دارایی", full:"دارایی و ملک", topics:[
+    { id:"home",      label:"🏠 خانه",  short:"خانه" },
+    { id:"car",       label:"🚗 خودرو", short:"خودرو" },
+    { id:"guarantee", label:"💸 ضمانت", short:"ضمانت", phase:2 },
+  ]},
+  { id:"travel", label:"✈️ سفر", full:"سفر و جابجایی", topics:[
+    { id:"travel",    label:"✈️ سفر",    short:"سفر" },
+    { id:"migration", label:"🌍 مهاجرت", short:"مهاجرت" },
+    { id:"moving",    label:"📦 جابجایی", short:"جابجایی", phase:2 },
+  ]},
+  { id:"study", label:"🎓 تحصیل", full:"تحصیل", topics:[
+    { id:"study", label:"🎓 تحصیل", short:"تحصیل" },
+  ]},
+  { id:"health", label:"🩺 سلامت", full:"سلامت", topics:[
+    { id:"health", label:"🩺 سلامتی", short:"سلامتی" },
+  ]},
 ];
+
+// ── کیبوردها
 const mainKb = { keyboard:[[ {text:"🔮 استخاره"} ],[ {text:"👤 حساب من"},{text:"🛍 فروشگاه"} ]], resize_keyboard:true, is_persistent:true };
-const topicKb = { inline_keyboard:[
-  [ {text:"❤️ ازدواج",callback_data:"topic:marriage"},{text:"💰 معامله",callback_data:"topic:transaction"} ],
-  [ {text:"💼 کار",callback_data:"topic:work"},{text:"🏠 خانه",callback_data:"topic:home"} ],
-  [ {text:"🚗 خودرو",callback_data:"topic:car"},{text:"✈️ سفر",callback_data:"topic:travel"} ],
-  [ {text:"📚 تحصیل",callback_data:"topic:study"},{text:"❓ تصمیم دیگر",callback_data:"topic:other"} ]
-]};
 const ritualKb = (t)=>({ inline_keyboard:[
   [{text:"🤲 خواندم، استخاره کن",callback_data:"draw:"+t}],
   [{text:"⏭ بدون آداب",callback_data:"draw:"+t}],
   [{text:"↩️ انصراف",callback_data:"home"}]
 ]});
+
+// منوی مرحلهٔ ۱: دسته‌ها (۲ستونه) + تصمیم دیگر
+function catKb(){
+  const rows=[];
+  for(let i=0;i<CATEGORIES.length;i+=2){
+    rows.push(CATEGORIES.slice(i,i+2).map(c=>({text:c.label,callback_data:"cat:"+c.id})));
+  }
+  rows.push([{text:"❓ تصمیم دیگر",callback_data:"topic:other"}]);
+  return {inline_keyboard:rows};
+}
+// منوی مرحلهٔ ۲: موضوعات دسته (قانون: برچسب بلند = ردیف مستقل)
+function topicKb(catId){
+  const cat = CATEGORIES.find(c=>c.id===catId);
+  if(!cat) return catKb();
+  const visible = cat.topics.filter(t=>!t.hidden && (t.phase||1)<=CURRENT_PHASE);
+  const rows=[]; let pair=null;
+  for(const t of visible){
+    const btn={text:t.label,callback_data:"topic:"+t.id};
+    if(t.label.length>12){ if(pair){rows.push([pair]);pair=null;} rows.push([btn]); }
+    else if(pair){ rows.push([pair,btn]); pair=null; }
+    else pair=btn;
+  }
+  if(pair) rows.push([pair]);
+  rows.push([{text:"↩️ بازگشت",callback_data:"cats"}]);
+  return {inline_keyboard:rows};
+}
+// دکمهٔ پریمیوم شخصی‌سازی‌شده (با محافظ طول)
+function premiumBtn(t){
+  const txt="💎 استخاره تخصصی "+topicShort(t);
+  return txt.length>30 ? "💎 استخاره تخصصی" : txt;
+}
 const resultKb = (t)=>({ inline_keyboard:[
-  [{text:"💎 باز کردن با ۱ اعتبار",callback_data:"unlock:"+t}],
+  [{text:premiumBtn(t),callback_data:"unlock:"+t}],
   [{text:"🔮 استخاره جدید",callback_data:"new"}],
   [{text:"🏠 منوی اصلی",callback_data:"home"}]
 ]});
+const unlockedKb = (t)=>({ inline_keyboard:[
+  [{text:"📖 مشاهدهٔ استخاره تخصصی",callback_data:"view:"+t}],
+  [{text:"🔮 استخاره جدید",callback_data:"new"}],
+  [{text:"🏠 منوی اصلی",callback_data:"home"}]
+]});
+const noCreditKb = { inline_keyboard:[
+  [{text:"🛍 مشاهدهٔ بسته‌ها",callback_data:"store"}],
+  [{text:"🔮 استخاره جدید",callback_data:"new"}],
+  [{text:"🏠 منوی اصلی",callback_data:"home"}]
+]};
 
 // ── پیام‌ها
 const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
 const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
 const PRIVATE_MSG = "🔒 این بات در حال تست خصوصی است.\n\nفعلاً فقط کاربران منتخب می‌توانند از آن استفاده کنند.\n\nبه‌زودی برای همه فعال می‌شود. 🌿";
 const ADMIN_ONLY_MSG = "⛔ این فرمان فقط برای مدیر بات قابل دسترسی است.";
+const STORE_MSG = "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = یک استخارهٔ تخصصی با تحلیل کامل موضوع تو\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاید:";
+const NO_CREDIT_MSG = "🌿 دوست عزیز، اعتبارت تموم شده.\n\nبرای دیدن استخارهٔ تخصصی همین موضوع، یکی از بسته‌ها رو انتخاب کن؛ کمتر از یک دقیقه شارژ می‌شه. 🌙";
+const DISCLAIMER = "⚖️ سلب مسئولیت و نکته مهم فقهی: فراموش نکنید که در احکام اسلامی، استخاره جایگزین عقل، تحقیق و مشورت نیست و «وحی منزل» محسوب نمی‌شود. این متن صرفاً یک تفسیر و راهنمای معنوی بر اساس آیات قرآن است. لذا برای تصمیمات حساس زندگی‌تان، حتماً در کنار این استخاره، با متخصصان و مشاوران کارآزمودهٔ آن حوزه مشورت فرمایید. 🤝";
 
-const topicFa  = (t) => (TOPICS.find(x=>x[0]===t)||[,t])[1];
 const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
 
-function topicBlock(r,t){
-  const T=(r.topics||{})[t];
+// ── جست‌وجوی موضوع
+function topicInfo(id){
+  for(const c of CATEGORIES) for(const t of c.topics) if(t.id===id) return t;
+  if(id==="other") return { id:"other", label:"❓ تصمیم دیگر", short:"تصمیم تو" };
+  return { id, label:"❓ تصمیم دیگر", short:"تصمیم تو" };
+}
+function topicShort(id){ return topicInfo(id).short || "تصمیم تو"; }
+function topicKey(id){ const t=topicInfo(id); return t.key || t.id; }
+
+// ── بلوک موضوع (Schema v4 + fallback)
+const ALIAS = { trade:"transaction", business2:"business" };
+function topicBlockV4(r,t){
+  const k = topicKey(t);
+  const T = (r.topics||{})[k] || (r.topics||{})[ALIAS[t]];
   if(T) return T;
-  if(t==="marriage"&&r.marriage) return {verdict:r.verdict,guidance:r.marriage,action:r.action};
-  if(t==="transaction"&&r.transaction) return {verdict:r.verdict,guidance:r.transaction,action:r.action};
-  return {verdict:r.verdict,guidance:r.key,action:r.action};
+  return { verdict:r.level, badge:r.badge,
+    tip:r.core_message||"",
+    warning:"این موضوع به‌صورت اختصاصی برای این صفحه تفسیر نشده؛ با احتیاط و مشورت پیش برو.",
+    action:"به پیام محوری آیه توجه کن و با بررسی و مشورت دقیق تصمیم بگیر." };
 }
 
+// ── رندر رایگان (Schema v4 + fallback قدیمی)
 function freeMsg(r,t){
-  const B=topicBlock(r,t);
-  const teaser = r.premium
-    ? "💎 تحلیل کامل + چک‌لیست مخصوص موضوع تو + کی بروم/کی بایستم…"
-    : (B.guidance||"").slice(0,70)+"…";
+  if(r.free_summary){
+    return [
+      "سلام دوست عزیز 🌿 خوش اومدی؛ من اینجام تا پیام خدا رو توی این تصمیم مهم برات رمزگشایی کنم.",
+      "📊 جواب استخاره: "+r.level+" "+r.badge,
+      "📝 پاسخ کلی به نیت شما:",
+      r.free_summary,"",
+      "📖 آیه سرصفحه (صفحهٔ "+toFa(r.page)+" قرآن کریم):",
+      "«"+r.arabic+"»",
+      "ترجمه روان: "+r.translation,
+      "(سورهٔ "+r.surah+"، آیهٔ "+toFa(r.ayah)+")"
+    ].join("\n");
+  }
+  // fallback (Schema v2/v3)
+  const B=(r.topics||{})[t]||{verdict:r.verdict,guidance:r.key,action:r.action};
   return [
     r.badge+" <b>نتیجه:</b> "+r.verdict,
     "<b>"+r.headline+"</b>","",
@@ -87,41 +181,53 @@ function freeMsg(r,t){
     (r.opener||"بذار این آیه رو بذاریم کنارِ تصمیمت:"),
     (r.plain||""),"",
     "✨ سه چراغ از دلِ آیه:",
-    ...r.guidance.map(g=>"• "+g),"",
-    "🔒 اگه می‌خوای بدونی این آیه دربارهٔ «"+topicFa(t)+"» دقیقاً چی می‌گه:",
-    teaser
+    ...(r.guidance||[]).map(g=>"• "+g),"",
+    "🔒 اگه می‌خوای بدونی این آیه دربارهٔ «"+topicInfo(t).label+"» دقیقاً چی می‌گه:",
+    r.premium ? "💎 تحلیل کامل + چک‌لیست مخصوص موضوع تو + کی بروم/کی بایستم…" : (B.guidance||"").slice(0,70)+"…"
   ].join("\n");
 }
 
-function unlockMsg(r,t){
+// ── رندر پریمیوم (Schema v4 + fallback قدیمی)
+function premiumMsg(r,t){
+  if(r.core_message){
+    const B=topicBlockV4(r,t);
+    return [
+      "💎 <b>استخاره تخصصی «"+topicInfo(t).label+"»</b>","",
+      "🎯 <b>پیام محوری و رمز آیه:</b>",
+      r.core_message,"",
+      topicInfo(t).label+" ["+B.verdict+" "+B.badge+"]",
+      "💡 نکته و رمز آیه: "+B.tip,
+      "⚠️ زنگ خطر / هشدار: "+B.warning,
+      "🛠 راهکار عملیاتی: "+B.action,"",
+      DISCLAIMER
+    ].join("\n");
+  }
+  // fallback قدیمی
   const T=(r.topics||{})[t]||{};
   if(r.premium){
     const P=r.premium;
     return [
-      "🔓 <b>برداشت تخصصی «"+topicFa(t)+"»</b>","",
+      "🔓 <b>برداشت تخصصی «"+topicInfo(t).label+"»</b>","",
       "🧭 <b>جمع‌بندی:</b> "+P.final_verdict,"",
       "🔍 <b>تحلیل تصمیم:</b>",P.decision_analysis,"",
       "🟢 <b>نقطهٔ قوت:</b> "+P.strengths,
       "⚠️ <b>نقطهٔ خطر:</b> "+P.risks,"",
-      "✅ <b>کی جلو بروم؟</b>",
-      ...P.go_conditions.map(c=>"• "+c),"",
-      "🛑 <b>کی متوقف شوم؟</b>",
-      ...P.stop_conditions.map(c=>"• "+c),"",
-      "📋 <b>چک‌لیست «"+topicFa(t)+"»:</b>",
-      ...(T.checklist||[]).map(c=>"☐ "+c),"",
+      "✅ <b>کی جلو بروم؟</b>",...P.go_conditions.map(c=>"• "+c),"",
+      "🛑 <b>کی متوقف شوم؟</b>",...P.stop_conditions.map(c=>"• "+c),"",
+      "📋 <b>چک‌لیست:</b>",...(T.checklist||[]).map(c=>"☐ "+c),"",
       "💡 "+(T.topic_note||""),
       "📖 <b>مثال واقعی:</b> "+P.real_example,
-      "⚠️ <b>اشتباه رایج:</b> "+P.common_mistake
+      "⚠️ <b>اشتباه رایج:</b> "+P.common_mistake,"",
+      DISCLAIMER
     ].join("\n");
   }
-  const B=topicBlock(r,t);
+  const B=(r.topics||{})[t]||{verdict:r.verdict,guidance:r.key,action:r.action};
   return [
-    "🔓 <b>برداشت تخصصی «"+topicFa(t)+"»</b>","",
-    "⚖️ "+(B.verdict||r.verdict),"",
-    B.guidance,"",
+    "🔓 <b>برداشت تخصصی «"+topicInfo(t).label+"»</b>","",
+    "⚖️ "+(B.verdict||r.verdict),"",B.guidance,"",
     "🎯 <b>اقدام:</b> "+(B.action||r.action),
     "🛡 <b>احتیاط:</b> "+r.caution,"",
-    "💎 <i>"+r.key+"</i>"
+    "💎 <i>"+r.key+"</i>","",DISCLAIMER
   ].join("\n");
 }
 
@@ -143,19 +249,15 @@ function pickIndex(){
   crypto.getRandomValues(b);
   return b[0] % CONTENT.length;
 }
-
-// ── چک دسترسی (Whitelist)
 function isAllowed(chatId, allowedUsers){
-  if(allowedUsers.length===0) return true; // اگر لیست خالی بود، همه مجازند (فاز تولید)
+  if(allowedUsers.length===0) return true;
   return allowedUsers.includes(chatId);
 }
-
-// ── چک ادمین (فقط کاربران در لیست ALLOWED_USERS)
 function isAdmin(chatId, allowedUsers){
   return allowedUsers.includes(chatId);
 }
 
-// ── پخش همگانی
+// ── پخش و ارسال
 async function broadcast(env, text){
   let cursor, sent=0, failed=0;
   for(;;){
@@ -171,8 +273,6 @@ async function broadcast(env, text){
   }
   return {sent, failed};
 }
-
-// ── ارسال به لیست مشخص
 async function sendToMany(env, ids, text){
   let sent=0, failed=0;
   for(const id of ids){
@@ -181,8 +281,6 @@ async function sendToMany(env, ids, text){
   }
   return {sent, failed};
 }
-
-// ── لیست اعضا (نسخه پرجزئیات)
 async function listMembers(env){
   const members=[];
   let cursor;
@@ -193,14 +291,7 @@ async function listMembers(env){
       if(isNaN(id)) continue;
       let u={};
       try{ const raw=await env.KV.get(k.name); if(raw) u=JSON.parse(raw); }catch(e){}
-      members.push({
-        id,
-        name: u.name||"",
-        credits: u.credits||0,
-        draws: u.draws||0,
-        unlocks: u.unlocks||0,
-        joined: u.joined||0
-      });
+      members.push({ id, name:u.name||"", credits:u.credits||0, draws:u.draws||0, unlocks:u.unlocks||0, joined:u.joined||0 });
     }
     if(page.list_complete) break;
     cursor = page.cursor;
@@ -212,10 +303,8 @@ async function listMembers(env){
 async function onMessage(m, env, allowedUsers){
   const chat=m.chat.id, text=(m.text||"").trim();
 
-  // ── لایه ۱: چک دسترسی (حالت خصوصی)
   if(!isAllowed(chat, allowedUsers)) return sendMessage(chat, PRIVATE_MSG, mainKb);
 
-  // ── /start + ذخیره نام و تاریخ عضویت
   if(text==="/start"){
     const cleanName = ((m.chat.first_name||"")+" "+(m.chat.last_name||"")).trim();
     const {u, exists} = await getUser(env, chat);
@@ -226,7 +315,7 @@ async function onMessage(m, env, allowedUsers){
     return sendMessage(chat, WELCOME, mainKb);
   }
 
-  // ── لایه ۲: فرامین ادمین (فقط برای ادمین)
+  // ── فرامین ادمین
   if(text==="/cancel"){
     if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
     await env.KV.delete("await:"+chat);
@@ -250,18 +339,13 @@ async function onMessage(m, env, allowedUsers){
     let lines = ["👥 اعضای بات: "+toFa(members.length),""];
     members.slice(0,50).forEach((mm,i)=>{
       const joined = mm.joined ? new Date(mm.joined).toLocaleDateString("fa-IR") : "—";
-      lines.push(
-        toFa(i+1)+". "+(mm.name||"بدون نام")+
-        "\n🆔 "+mm.id+
-        "\n💎 "+toFa(mm.credits)+" | 🔮 "+toFa(mm.draws)+" | 🔓 "+toFa(mm.unlocks)+
-        "\n📅 عضویت: "+joined
-      );
+      lines.push(toFa(i+1)+". "+(mm.name||"بدون نام")+"\n🆔 "+mm.id+"\n💎 "+toFa(mm.credits)+" | 🔮 "+toFa(mm.draws)+" | 🔓 "+toFa(mm.unlocks)+"\n📅 عضویت: "+joined);
     });
     if(members.length>50) lines.push("… و "+toFa(members.length-50)+" عضو دیگر");
     return sendPlain(chat, lines.join("\n\n"), mainKb);
   }
 
-  // ── حالت انتظار (پخش/ارسال)
+  // ── حالت انتظار
   const awaitingRaw = await env.KV.get("await:"+chat);
   if(awaitingRaw){
     let awaiting; try{ awaiting=JSON.parse(awaitingRaw);}catch(e){ awaiting={mode:"broadcast"}; }
@@ -276,7 +360,7 @@ async function onMessage(m, env, allowedUsers){
   }
 
   // ── منوی عادی
-  if(text==="🔮 استخاره") return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
+  if(text==="🔮 استخاره") return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
   if(text==="👤 حساب من"){
     const {u} = await getUser(env, chat);
     return sendMessage(chat,
@@ -284,8 +368,7 @@ async function onMessage(m, env, allowedUsers){
       "\n🔮 استخاره‌ها: "+toFa(u.draws)+
       "\n🔓 باز شده: "+toFa(u.unlocks), mainKb);
   }
-  if(text==="🛍 فروشگاه") return sendMessage(chat,
-    "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = باز کردن یک برداشت تخصصی و چک‌لیست تصمیم\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاد:", storeKb);
+  if(text==="🛍 فروشگاه") return sendMessage(chat, STORE_MSG, storeKb);
   return sendMessage(chat,"برای شروع، «🔮 استخاره» را بزن.",mainKb);
 }
 
@@ -313,25 +396,32 @@ async function onSuccessfulPayment(m, env){
 async function onCallback(cq, env, allowedUsers){
   const chat=cq.message.chat.id, data=cq.data||"";
   await answerCallback(cq.id);
-  
-  // ── لایه ۱: چک دسترسی (حالت خصوصی)
   if(!isAllowed(chat, allowedUsers)) return sendMessage(chat, PRIVATE_MSG, mainKb);
-  
   const {u, exists} = await getUser(env, chat);
 
   if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);
-  if(data==="new")   return sendMessage(chat,"موضوع استخاره‌ات را انتخاب کن:",topicKb);
+  if(data==="new")   return sendMessage(chat,"📂 دسته موردنظرت رو انتخاب کن:",catKb());
+  if(data==="cats")  return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
+  if(data==="store") return sendMessage(chat, STORE_MSG, storeKb);
+
+  if(data.startsWith("cat:")){
+    const cat = CATEGORIES.find(c=>c.id===data.slice(4));
+    if(!cat) return sendMessage(chat,"📂 دسته موردنظرت رو انتخاب کن:",catKb());
+    return sendMessage(chat,"📂 دستهٔ «"+cat.full+"» — موضوعت رو انتخاب کن:",topicKb(cat.id));
+  }
 
   if(data.startsWith("buy:")){
     const pack = PACKS.find(p=>p.id===data.slice(4));
     if(!pack) return sendMessage(chat,"⚠️ بسته پیدا نشد.",mainKb);
     return sendInvoice(chat, pack);
   }
+
   if(data.startsWith("topic:")){
     const t = data.slice(6);
     if(exists && u.topic !== t){ u.topic = t; await saveUser(env,chat,u); }
     return sendMessage(chat, RITUAL, ritualKb(t));
   }
+
   if(data.startsWith("draw:")){
     const t = data.slice(5);
     u.topic = t; u.last = pickIndex(); u.draws += 1;
@@ -339,18 +429,19 @@ async function onCallback(cq, env, allowedUsers){
     await sendMessage(chat,"🔮 در حال انجام استخاره...");
     return sendMessage(chat, freeMsg(CONTENT[u.last], t), resultKb(t));
   }
-  if(data.startsWith("unlock:")){
-    const t = data.slice(7);
+
+  if(data.startsWith("unlock:") || data.startsWith("view:")){
+    const t = data.slice(data.indexOf(":")+1);
     const rec = CONTENT[u.last];
     if(!rec) return sendMessage(chat,"⚠️ خطای کوچک؛ لطفاً یک استخارهٔ جدید بگیر.",mainKb);
     const key = u.last+":"+t;
-    if(u.unlocked.includes(key)) return sendMessage(chat, unlockMsg(rec, t), mainKb);
+    if(u.unlocked.includes(key)) return sendMessage(chat, premiumMsg(rec, t), unlockedKb(t));
     if(u.credits>0){
       u.credits -= 1; u.unlocks += 1; u.unlocked.push(key);
       await saveUser(env,chat,u);
-      return sendMessage(chat, unlockMsg(rec, t), mainKb);
+      return sendMessage(chat, premiumMsg(rec, t), unlockedKb(t));
     }
-    return sendMessage(chat,"💎 اعتبار کافی نیست.\n\nاز «🛍 فروشگاه» یه بسته بخر:", storeKb);
+    return sendMessage(chat, NO_CREDIT_MSG, noCreditKb);
   }
 }
 
@@ -358,23 +449,17 @@ export default {
   async fetch(request, env){
     TOKEN = env.BOT_TOKEN || "";
     WALLET_TOKEN = env.WALLET_TOKEN || "WALLET-TEST-1111111111111111";
-    
-    // بارگذاری لیست کاربران مجاز از Environment Variable
     const allowedStr = env.ALLOWED_USERS || "";
-    const allowedUsers = allowedStr 
-      ? allowedStr.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n)) 
+    const allowedUsers = allowedStr
+      ? allowedStr.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n))
       : [];
 
     if(request.method==="GET"){
       const url=new URL(request.url);
       if(url.pathname==="/test"){
-        const out={ 
-          hasToken:!!env.BOT_TOKEN, 
-          hasKV:!!env.KV, 
-          records:CONTENT.length, 
+        const out={ hasToken:!!env.BOT_TOKEN, hasKV:!!env.KV, records:CONTENT.length,
           wallet: WALLET_TOKEN.startsWith("WALLET-TEST")?"test":"real",
-          privateMode: allowedUsers.length>0 ? allowedUsers.length+" users allowed" : "public (all users)"
-        };
+          privateMode: allowedUsers.length>0 ? allowedUsers.length+" users allowed" : "public (all users)" };
         return new Response(JSON.stringify(out,null,2),{headers:{"Content-Type":"application/json"}});
       }
       return new Response("ok");
