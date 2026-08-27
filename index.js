@@ -1,4 +1,4 @@
-// ── neshandel-bot — نسخه ۱۴: منوی ساده‌شده + بسته‌های مدال‌دار + Schema v4
+// ── neshandel-bot — نسخه ۱۵: قالب تأییدشده + Schema v4
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -72,28 +72,23 @@ const CATEGORIES = [
 
 // ── کیبوردها
 const mainKb = { keyboard:[[ {text:"🔮 استخاره"} ],[ {text:"👤 حساب من"},{text:"🛍 فروشگاه"} ]], resize_keyboard:true, is_persistent:true };
-// آداب: فقط «خواندم» + «انصراف» (بدون آداب حذف شد)
 const ritualKb = (t)=>({ inline_keyboard:[
   [{text:"🤲 خواندم، استخاره کن",callback_data:"draw:"+t}],
   [{text:"↩️ انصراف",callback_data:"home"}]
 ]});
-// نتیجه: دکمهٔ پریمیوم شخصی + استخاره جدید (منوی اصلی حذف شد)
 const resultKb = (t)=>({ inline_keyboard:[
   [{text:premiumBtn(t),callback_data:"unlock:"+t}],
   [{text:"🔮 استخاره جدید",callback_data:"new"}]
 ]});
-// پس از باز کردن: بازبینی رایگان + استخاره جدید
 const unlockedKb = (t)=>({ inline_keyboard:[
   [{text:"📖 مشاهدهٔ استخاره تخصصی",callback_data:"view:"+t}],
   [{text:"🔮 استخاره جدید",callback_data:"new"}]
 ]});
-// بدون اعتبار: فروشگاه + استخاره جدید
 const noCreditKb = { inline_keyboard:[
   [{text:"🛍 مشاهدهٔ بسته‌ها",callback_data:"store"}],
   [{text:"🔮 استخاره جدید",callback_data:"new"}]
 ]};
 
-// منوی مرحلهٔ ۱: فقط دسته‌ها (تصمیم دیگر حذف شد)
 function catKb(){
   const rows=[];
   for(let i=0;i<CATEGORIES.length;i+=2){
@@ -101,7 +96,6 @@ function catKb(){
   }
   return {inline_keyboard:rows};
 }
-// منوی مرحلهٔ ۲: موضوعات دسته + بازگشت (قانون: برچسب بلند = ردیف مستقل)
 function topicKb(catId){
   const cat = CATEGORIES.find(c=>c.id===catId);
   if(!cat) return catKb();
@@ -117,7 +111,6 @@ function topicKb(catId){
   rows.push([{text:"↩️ بازگشت",callback_data:"cats"}]);
   return {inline_keyboard:rows};
 }
-// دکمهٔ پریمیوم شخصی‌سازی‌شده (با محافظ طول)
 function premiumBtn(t){
   const txt="💎 استخاره تخصصی "+topicShort(t);
   return txt.length>30 ? "💎 استخاره تخصصی" : txt;
@@ -142,7 +135,7 @@ function topicInfo(id){
 function topicShort(id){ return topicInfo(id).short || "تصمیم تو"; }
 function topicKey(id){ const t=topicInfo(id); return t.key || t.id; }
 
-// ── بلوک موضوع (Schema v4 + fallback)
+// ── بلوک موضوع (Schema v4)
 const ALIAS = { trade:"transaction", business2:"business" };
 function topicBlockV4(r,t){
   const k = topicKey(t);
@@ -154,21 +147,41 @@ function topicBlockV4(r,t){
     action:"به پیام محوری آیه توجه کن و با بررسی و مشورت دقیق تصمیم بگیر." };
 }
 
-// ── رندر رایگان (Schema v4 + fallback قدیمی)
+// ── بلوک موضوع (Schema قدیمی — پشتیبان)
+function topicBlock(r,t){
+  const k = topicKey(t);
+  const T = (r.topics||{})[k] || (r.topics||{})[ALIAS[t]];
+  if(T) return T;
+  return {
+    verdict: r.verdict || r.level || "میانه",
+    badge:   r.badge  || "⚖️",
+    guidance:r.key    || "",
+    action:  r.action || "",
+    tip:     r.key    || "",
+    warning: r.caution|| ""
+  };
+}
+
+// ── رندر نسخهٔ رایگان (مطابق قالب تأییدشده) ─────────────────────────
 function freeMsg(r,t){
+  // ── مسیر اصلی: رکوردهای Schema v4 (دارای free_summary و cta)
   if(r.free_summary){
     return [
-      "سلام دوست عزیز 🌿 خوش اومدی؛ من اینجام تا پیام خدا رو توی این تصمیم مهم برات رمزگشایی کنم.",
-      "📊 جواب استخاره: "+r.level+" "+r.badge,
+      "سلام رفیق عزیزم! 🌿 خوش اومدی به این محفل نورانی. می‌دونم یه نیت مهم توی دلت داری و اومدی از قرآن راهنمایی بگیری. بیا با هم بشینیم و ببینیم خدا چه پیامی برات فرستاده. یه نفس عمیق بکش و با قلب باز بخون...","",
+      "📊 جواب استخاره: "+r.level+" "+r.badge,"",
       "📝 پاسخ کلی به نیت شما:",
       r.free_summary,"",
-      "📖 آیه سرصفحه (صفحهٔ "+toFa(r.page)+" قرآن کریم):",
-      "«"+r.arabic+"»",
-      "ترجمه روان: "+r.translation,
-      "(سورهٔ "+r.surah+"، آیهٔ "+toFa(r.ayah)+")"
+      "📖 آیه اول سرصفحه (صفحه "+toFa(r.page)+" – سوره "+r.surah+"، آیه "+toFa(r.ayah)+"):",
+      r.arabic,"",
+      "🌐 ترجمه روان:",
+      "«"+r.translation+"»","",
+      "📍 سوره "+r.surah+" | آیه "+toFa(r.ayah),"",
+      (r.cta||"")
     ].join("\n");
   }
-  const B=(r.topics||{})[t]||{verdict:r.verdict,guidance:r.key,action:r.action};
+  // ── مسیر پشتیبان: رکوردهای قدیمی (بدون free_summary)
+  const B=topicBlock(r,t);
+  const teaser = r.premium ? "💎 تحلیل کامل + چک‌لیست مخصوص موضوع تو + کی بروم/کی بایستم…" : (B.guidance||"").slice(0,70)+"…";
   return [
     r.badge+" <b>نتیجه:</b> "+r.verdict,
     "<b>"+r.headline+"</b>","",
@@ -180,25 +193,33 @@ function freeMsg(r,t){
     "✨ سه چراغ از دلِ آیه:",
     ...(r.guidance||[]).map(g=>"• "+g),"",
     "🔒 اگه می‌خوای بدونی این آیه دربارهٔ «"+topicInfo(t).label+"» دقیقاً چی می‌گه:",
-    r.premium ? "💎 تحلیل کامل + چک‌لیست مخصوص موضوع تو + کی بروم/کی بایستم…" : (B.guidance||"").slice(0,70)+"…"
+    teaser
   ].join("\n");
 }
 
-// ── رندر پریمیوم (Schema v4 + fallback قدیمی)
+// ── رندر نسخهٔ پولی (مطابق قالب تأییدشده) ─────────────────────────
 function premiumMsg(r,t){
+  // ── مسیر اصلی: رکوردهای Schema v4 (دارای core_message و final_summary)
   if(r.core_message){
     const B=topicBlockV4(r,t);
+    const L=topicInfo(t).label;
     return [
-      "💎 <b>استخاره تخصصی «"+topicInfo(t).label+"»</b>","",
-      "🎯 <b>پیام محوری و رمز آیه:</b>",
+      "💎 استخاره تخصصی | "+L,
+      "نتیجه: "+B.verdict+" "+B.badge,"",
+      "💎 پیام محوری و منطوق آیه:",
       r.core_message,"",
-      topicInfo(t).label+" ["+B.verdict+" "+B.badge+"]",
-      "💡 نکته و رمز آیه: "+B.tip,
-      "⚠️ زنگ خطر / هشدار: "+B.warning,
-      "🛠 راهکار عملیاتی: "+B.action,"",
+      "💡 نکته و رمز آیه:",
+      B.tip,"",
+      "⚠️ زنگ خطر / هشدار:",
+      B.warning,"",
+      "🛠 راهکار عملیاتی:",
+      B.action,"",
+      "🌟 جمع‌بندی نهایی استخاره صفحه "+toFa(r.page)+":",
+      (r.final_summary||""),"",
       DISCLAIMER
     ].join("\n");
   }
+  // ── مسیر پشتیبان: رکوردهای قدیمی (بدون core_message)
   const T=(r.topics||{})[t]||{};
   if(r.premium){
     const P=r.premium;
@@ -217,7 +238,7 @@ function premiumMsg(r,t){
       DISCLAIMER
     ].join("\n");
   }
-  const B=(r.topics||{})[t]||{verdict:r.verdict,guidance:r.key,action:r.action};
+  const B=topicBlock(r,t);
   return [
     "🔓 <b>برداشت تخصصی «"+topicInfo(t).label+"»</b>","",
     "⚖️ "+(B.verdict||r.verdict),"",B.guidance,"",
