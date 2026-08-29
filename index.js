@@ -1,4 +1,10 @@
-// ── neshandel-bot — نسخه ۱۵: قالب تأییدشده + Schema v4
+// ── neshandel-bot — نسخه ۱۶: قالب تأییدشده + Schema v5
+// تغییرات نسبت به نسخه ۱۵:
+// ۱) freeMsg: قالب جدید رایگان با intro و cta_free (fallback به cta و سلام پیش‌فرض)
+// ۲) premiumMsg: چاپ core_message (شامل ۳ عبارت کلیدی + «علت تأیید/رد استخاره»)
+//    + راهکار عملیاتی به‌صورت بولت ۳ مرحله‌ای (action آرایه‌ای) + cta_dua پیش از سلب مسئولیت
+// ۳) topicBlockV5 جایگزین topicBlockV4 شد؛ action رشته‌ای و آرایه‌ای هر دو پشتیبانی می‌شود
+// ۴) endpoint /test اکنون نسخه و schema را هم گزارش می‌کند
 import { CONTENT } from "./content/index.js";
 
 let TOKEN = "";
@@ -135,16 +141,22 @@ function topicInfo(id){
 function topicShort(id){ return topicInfo(id).short || "تصمیم تو"; }
 function topicKey(id){ const t=topicInfo(id); return t.key || t.id; }
 
-// ── بلوک موضوع (Schema v4)
+// ── رندر راهکار عملیاتی (رشتهٔ قدیمی یا آرایهٔ ۳ مرحله‌ای جدید)
+function renderAction(a){
+  if(Array.isArray(a)) return a.map(x=>"-   "+x).join("\n");
+  return a||"";
+}
+
+// ── بلوک موضوع (Schema v5 — سازگار با action رشته/آرایه)
 const ALIAS = { trade:"transaction", business2:"business" };
-function topicBlockV4(r,t){
+function topicBlockV5(r,t){
   const k = topicKey(t);
   const T = (r.topics||{})[k] || (r.topics||{})[ALIAS[t]];
   if(T) return T;
-  return { verdict:r.level, badge:r.badge,
+  return { verdict:r.level||r.verdict||"میانه", badge:r.badge||"⚖️",
     tip:r.core_message||"",
     warning:"این موضوع به‌صورت اختصاصی برای این صفحه تفسیر نشده؛ با احتیاط و مشورت پیش برو.",
-    action:"به پیام محوری آیه توجه کن و با بررسی و مشورت دقیق تصمیم بگیر." };
+    action:["💪 به پیام محوری آیه توجه کن و با بررسی دقیق تصمیم بگیر.","🤝 با یک فرد خبره یا مشاور کارآزموده مشورت کن.","🤲 صدقه بده و با توکل بر خدا اقدام کن."] };
 }
 
 // ── بلوک موضوع (Schema قدیمی — پشتیبان)
@@ -162,12 +174,12 @@ function topicBlock(r,t){
   };
 }
 
-// ── رندر نسخهٔ رایگان (مطابق قالب تأییدشده) ─────────────────────────
+// ── رندر نسخهٔ رایگان (قالب تأییدشدهٔ v16) ─────────────────────────
 function freeMsg(r,t){
-  // ── مسیر اصلی: رکوردهای Schema v4 (دارای free_summary و cta)
+  // ── مسیر اصلی: رکوردهای Schema v5 (دارای free_summary)
   if(r.free_summary){
     return [
-      "سلام رفیق عزیزم! 🌿 خوش اومدی به این محفل نورانی. می‌دونم یه نیت مهم توی دلت داری و اومدی از قرآن راهنمایی بگیری. بیا با هم بشینیم و ببینیم خدا چه پیامی برات فرستاده. یه نفس عمیق بکش و با قلب باز بخون...","",
+      (r.intro||"سلام رفیق عزیزم! 🌿 خوش اومدی به این محفل نورانی. می‌دونم یه نیت مهم توی دلت داری و اومدی از قرآن راهنمایی بگیری. بیا با هم بشینیم و ببینیم خدا چه پیامی برات فرستاده. یه نفس عمیق بکش و با قلب باز بخون..."),"",
       "📊 جواب استخاره: "+r.level+" "+r.badge,"",
       "📝 پاسخ کلی به نیت شما:",
       r.free_summary,"",
@@ -176,10 +188,10 @@ function freeMsg(r,t){
       "🌐 ترجمه روان:",
       "«"+r.translation+"»","",
       "📍 سوره "+r.surah+" | آیه "+toFa(r.ayah),"",
-      (r.cta||"")
+      (r.cta_free||r.cta||"")
     ].join("\n");
   }
-  // ── مسیر پشتیبان: رکوردهای قدیمی (بدون free_summary)
+  // ── مسیر پشتیبان: رکوردهای قدیمی (بدون تغییر)
   const B=topicBlock(r,t);
   const teaser = r.premium ? "💎 تحلیل کامل + چک‌لیست مخصوص موضوع تو + کی بروم/کی بایستم…" : (B.guidance||"").slice(0,70)+"…";
   return [
@@ -197,29 +209,30 @@ function freeMsg(r,t){
   ].join("\n");
 }
 
-// ── رندر نسخهٔ پولی (مطابق قالب تأییدشده) ─────────────────────────
+// ── رندر نسخهٔ پولی (قالب تأییدشدهٔ v16) ─────────────────────────
 function premiumMsg(r,t){
-  // ── مسیر اصلی: رکوردهای Schema v4 (دارای core_message و final_summary)
+  // ── مسیر اصلی: رکوردهای Schema v5 (دارای core_message)
   if(r.core_message){
-    const B=topicBlockV4(r,t);
+    const B=topicBlockV5(r,t);
     const L=topicInfo(t).label;
     return [
       "💎 استخاره تخصصی | "+L,
       "نتیجه: "+B.verdict+" "+B.badge,"",
       "💎 پیام محوری و منطوق آیه:",
-      r.core_message,"",
+      r.core_message,"",           // شامل ۳ عبارت کلیدی + «علت تأیید/رد استخاره»
       "💡 نکته و رمز آیه:",
       B.tip,"",
       "⚠️ زنگ خطر / هشدار:",
       B.warning,"",
       "🛠 راهکار عملیاتی:",
-      B.action,"",
+      renderAction(B.action),"",
       "🌟 جمع‌بندی نهایی استخاره صفحه "+toFa(r.page)+":",
       (r.final_summary||""),"",
+      (r.cta_dua||""),"",
       DISCLAIMER
     ].join("\n");
   }
-  // ── مسیر پشتیبان: رکوردهای قدیمی (بدون core_message)
+  // ── مسیر پشتیبان: رکوردهای قدیمی (بدون تغییر)
   const T=(r.topics||{})[t]||{};
   if(r.premium){
     const P=r.premium;
@@ -474,7 +487,7 @@ export default {
     if(request.method==="GET"){
       const url=new URL(request.url);
       if(url.pathname==="/test"){
-        const out={ hasToken:!!env.BOT_TOKEN, hasKV:!!env.KV, records:CONTENT.length,
+        const out={ version:16, schema:5, hasToken:!!env.BOT_TOKEN, hasKV:!!env.KV, records:CONTENT.length,
           wallet: WALLET_TOKEN.startsWith("WALLET-TEST")?"test":"real",
           privateMode: allowedUsers.length>0 ? allowedUsers.length+" users allowed" : "public (all users)" };
         return new Response(JSON.stringify(out,null,2),{headers:{"Content-Type":"application/json"}});
