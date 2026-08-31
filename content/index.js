@@ -3,8 +3,8 @@
 
 import { P001_019 } from "./p001-009.js";
 import { P021_039 } from "./p011-019.js";
-import { P041_049 } from "./p021-039.js"; // ← اضافه شد (صفحات ۲۱ تا ۳۹)
-// import { P051_069 } from "./p051-069.js";
+import { P041_059 } from "./p021-039.js"; // ← اضافه شد (صفحات ۲۱ تا ۳۹)
+// import { P061_079 } from "./p061-079.js";
 // ... بقیه ایمپورت‌ها
 
 export const CONTENT = [
