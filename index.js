@@ -461,25 +461,41 @@ export default {
   async fetch(request, env) {
     if (request.method === "GET") {
       const url = new URL(request.url);
-      if (url.pathname === "/test") {
-        const allowedStr = env.ALLOWED_USERS || "";
-        const allowedUsers = allowedStr
-          ? allowedStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
-          : [];
-        return new Response(JSON.stringify({
-          version: 17,
-          schema: 5,
-          hasToken: !!env.BOT_TOKEN,
-          hasKV: !!env.USERS_KV,
-          hasDO: !!env.CREDIT_MANAGER,
-          records: CONTENT.length,
-          wallet: (env.WALLET_TOKEN || "").startsWith("WALLET-TEST") ? "test" : "real",
-          privateMode: allowedUsers.length > 0 ? allowedUsers.length + " users allowed" : "public (all users)",
-        }, null, 2), { headers: { "Content-Type": "application/json" } });
-      }
-      return new Response("ok");
-    }
-
+if (url.pathname === "/test") {
+  const allowedStr = env.ALLOWED_USERS || "";
+  const allowedUsers = allowedStr
+    ? allowedStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+    : [];
+  
+  // پیدا کردن صفحات غایب
+  const existingPages = new Set(CONTENT.map(r => r.page));
+  const missingPages = [];
+  for (let i = 1; i <= 603; i += 2) {
+    if (!existingPages.has(i)) missingPages.push(i);
+  }
+  
+  // پیدا کردن صفحات تکراری
+  const pageCounts = {};
+  CONTENT.forEach(r => { pageCounts[r.page] = (pageCounts[r.page] || 0) + 1; });
+  const duplicatedPages = Object.entries(pageCounts)
+    .filter(([_, c]) => c > 1)
+    .map(([p, c]) => `${p} (×${c})`);
+  
+  return new Response(JSON.stringify({
+    version: 17,
+    schema: 5,
+    hasToken: !!env.BOT_TOKEN,
+    hasKV: !!env.USERS_KV,
+    hasDO: !!env.CREDIT_MANAGER,
+    records: CONTENT.length,
+    expectedRecords: 302,
+    missingCount: missingPages.length,
+    missingPages: missingPages,
+    duplicatedPages: duplicatedPages,
+    wallet: (env.WALLET_TOKEN || "").startsWith("WALLET-TEST") ? "test" : "real",
+    privateMode: allowedUsers.length > 0 ? allowedUsers.length + " users allowed" : "public (all users)",
+  }, null, 2), { headers: { "Content-Type": "application/json" } });
+}
     if (request.method === "POST") {
       try {
         const u = await request.json();
