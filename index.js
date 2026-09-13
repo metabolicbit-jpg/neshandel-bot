@@ -4,7 +4,8 @@ import { CONTENT } from "./content/index.js";
 
 // ========== 2. CONSTANTS ==========
 const API_BASE = "https://tapi.bale.ai";
-const DRAW_COOLDOWN_MS = 5000; // ۵ ثانیه بین دو استخاره
+const DRAW_COOLDOWN_MS = 5000;
+const DO_VERSION_PREFIX = "v2:";  // ← تغییر: prefix برای DO جدید
 
 const CATEGORIES = [
   { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
@@ -61,14 +62,12 @@ const RATE_LIMIT_MSG = "⏳ لطفاً چند لحظه صبر کن و بعد د�
 const ADMIN_ONLY_MSG = "⛔ این فرمان فقط برای مدیر بات قابل دسترسی است.";
 
 const toFa = n => String(n).replace(/\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
-
 const ALIAS = { trade:"transaction", business2:"business" };
 
 // ========== 3. DURABLE OBJECT ==========
 export class CreditManager extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-
     try {
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS credits (
@@ -149,11 +148,16 @@ export class CreditManager extends DurableObject {
   }
 
   async canDraw(userId) {
-    const r = this.ctx.storage.sql.exec(
-      `SELECT last_draw_time FROM credits WHERE user_id = ?`, userId
-    ).one();
-    if (!r || !r.last_draw_time) return true;
-    return (Date.now() - r.last_draw_time) >= DRAW_COOLDOWN_MS;
+    try {
+      const r = this.ctx.storage.sql.exec(
+        `SELECT last_draw_time FROM credits WHERE user_id = ?`, userId
+      ).one();
+      if (!r || !r.last_draw_time) return true;
+      return (Date.now() - r.last_draw_time) >= DRAW_COOLDOWN_MS;
+    } catch (e) {
+      console.error("canDraw error:", e);
+      return true;  // اگر خطا داد، اجازه بده (safe fallback)
+    }
   }
 
   async recordEstekhare(userId, topic, page) {
@@ -225,8 +229,9 @@ const sendInvoice = (env, chat_id, pack) =>
 const answerPreCheckout = (env, id, ok, error_message) =>
   baleCall(env, "answerPreCheckoutQuery", { pre_checkout_query_id: id, ok, ...(error_message ? { error_message } : {}) });
 
+// 🔥 نکته کلیدی: DO جدید با prefix v2
 function getStub(env, userId) {
-  const id = env.CREDIT_MANAGER.idFromName(String(userId));
+  const id = env.CREDIT_MANAGER.idFromName(DO_VERSION_PREFIX + String(userId));
   return env.CREDIT_MANAGER.get(id);
 }
 
@@ -417,7 +422,7 @@ async function onMessage(env, m, allowedUsers) {
   const stub = getStub(env, chat);
   const isAdmin = isUserAdmin(env, chat);
 
-  // ===== حالت انتظار ادمین (broadcast/send) =====
+  // ===== حالت انتظار ادمین =====
   const awaitingRaw = await env.USERS_KV.get("await:" + chat);
   if (awaitingRaw && isAdmin) {
     let awaiting;
@@ -435,17 +440,22 @@ async function onMessage(env, m, allowedUsers) {
 
   // ===== /start =====
   if (text === "/start") {
-    const cleanName = ((m.chat.first_name || "") + " " + (m.chat.last_name || "")).trim();
-    const stats = await stub.getStats(chat);
-    const isNew = !stats.joined;
-    await stub.ensureUser(chat, cleanName);
-    if (isNew) await stub.addCredits(chat, 2);
-
     try {
-      await env.USERS_KV.put("user:" + chat, JSON.stringify({ name: cleanName, joined: Date.now() }));
-    } catch (e) { console.error("KV put error:", e); }
+      const cleanName = ((m.chat.first_name || "") + " " + (m.chat.last_name || "")).trim();
+      const stats = await stub.getStats(chat);
+      const isNew = !stats.joined;
+      await stub.ensureUser(chat, cleanName);
+      if (isNew) await stub.addCredits(chat, 2);
 
-    return sendMessage(env, chat, WELCOME, mainKb);
+      try {
+        await env.USERS_KV.put("user:" + chat, JSON.stringify({ name: cleanName, joined: Date.now() }));
+      } catch (e) { console.error("KV put error:", e); }
+
+      return sendMessage(env, chat, WELCOME, mainKb);
+    } catch (e) {
+      console.error("/start error:", e);
+      return sendMessage(env, chat, "⚠️ خطا در ثبت‌نام. لطفاً دوباره /start بزن.", mainKb);
+    }
   }
 
   // ===== دستورات ادمین =====
@@ -487,11 +497,16 @@ async function onMessage(env, m, allowedUsers) {
     return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
 
   if (text === "👤 حساب من") {
-    const s = await stub.getStats(chat);
-    return sendMessage(env, chat,
-      "👤 <b>حساب من</b>\n\n💎 اعتبار: " + toFa(s.amount) +
-      "\n🔮 استخاره‌ها: " + toFa(s.total_estekhare) +
-      "\n🔓 باز شده: " + toFa(s.total_opens), mainKb);
+    try {
+      const s = await stub.getStats(chat);
+      return sendMessage(env, chat,
+        "👤 <b>حساب من</b>\n\n💎 اعتبار: " + toFa(s.amount) +
+        "\n🔮 استخاره‌ها: " + toFa(s.total_estekhare) +
+        "\n🔓 باز شده: " + toFa(s.total_opens), mainKb);
+    } catch (e) {
+      console.error("account error:", e);
+      return sendMessage(env, chat, "⚠️ خطا در خواندن حساب. لطفاً دوباره تلاش کن.", mainKb);
+    }
   }
 
   if (text === "🛍 فروشگاه" || text === "/shop")
@@ -537,7 +552,6 @@ async function onCallback(env, cq, allowedUsers) {
     if (data.startsWith("draw:")) {
       const t = data.slice(5);
 
-      // 🔥 Rate limit check
       const canDraw = await stub.canDraw(chat);
       if (!canDraw) {
         return sendMessage(env, chat, RATE_LIMIT_MSG, ritualKb(t));
@@ -598,7 +612,6 @@ async function onSuccessfulPayment(env, m) {
 // ========== 9. MAIN WORKER ==========
 export default {
   async fetch(request, env) {
-    // ---------- GET ----------
     if (request.method === "GET") {
       const url = new URL(request.url);
 
@@ -625,8 +638,9 @@ export default {
           .map((entry) => entry[0] + " (×" + entry[1] + ")");
 
         return new Response(JSON.stringify({
-          version: 18,
+          version: 19,
           schema: 5,
+          doPrefix: DO_VERSION_PREFIX,
           hasToken: !!env.BOT_TOKEN,
           hasKV: !!env.USERS_KV,
           hasDO: !!env.CREDIT_MANAGER,
@@ -645,7 +659,6 @@ export default {
       return new Response("ok");
     }
 
-    // ---------- POST ----------
     if (request.method === "POST") {
       try {
         const u = await request.json();
