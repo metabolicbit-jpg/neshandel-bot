@@ -4,6 +4,7 @@ import { CONTENT } from "./content/index.js";
 
 // ========== 2. CONSTANTS ==========
 const API_BASE = "https://tapi.bale.ai";
+const DRAW_COOLDOWN_MS = 5000; // ۵ ثانیه بین دو استخاره
 
 const CATEGORIES = [
   { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
@@ -56,6 +57,8 @@ const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ است
 const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
 const STORE_MSG = "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = یک استخارهٔ تخصصی با تحلیل کامل موضوع تو\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاد:";
 const NO_CREDIT_MSG = "🌿 دوست عزیز، اعتبارت تموم شده.\n\nبرای دیدن استخارهٔ تخصصی همین موضوع، یکی از بسته‌ها رو انتخاب کن؛ کمتر از یک دقیقه شارژ می‌شه. 🌙";
+const RATE_LIMIT_MSG = "⏳ لطفاً چند لحظه صبر کن و بعد دوباره استخاره بگیر.";
+const ADMIN_ONLY_MSG = "⛔ این فرمان فقط برای مدیر بات قابل دسترسی است.";
 
 const toFa = n => String(n).replace(/\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
 
@@ -75,6 +78,7 @@ export class CreditManager extends DurableObject {
           total_opens INTEGER NOT NULL DEFAULT 0,
           last_topic TEXT,
           last_page INTEGER,
+          last_draw_time INTEGER,
           unlocked TEXT DEFAULT '[]',
           name TEXT DEFAULT '',
           joined INTEGER DEFAULT 0,
@@ -92,6 +96,7 @@ export class CreditManager extends DurableObject {
     tryAlter(`ALTER TABLE credits ADD COLUMN total_opens INTEGER NOT NULL DEFAULT 0`);
     tryAlter(`ALTER TABLE credits ADD COLUMN last_topic TEXT`);
     tryAlter(`ALTER TABLE credits ADD COLUMN last_page INTEGER`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN last_draw_time INTEGER`);
     tryAlter(`ALTER TABLE credits ADD COLUMN unlocked TEXT DEFAULT '[]'`);
     tryAlter(`ALTER TABLE credits ADD COLUMN name TEXT DEFAULT ''`);
     tryAlter(`ALTER TABLE credits ADD COLUMN joined INTEGER DEFAULT 0`);
@@ -102,7 +107,7 @@ export class CreditManager extends DurableObject {
       `SELECT * FROM credits WHERE user_id = ?`, userId
     ).one();
     if (r) return r;
-    return { user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0, last_topic: null, last_page: null, unlocked: "[]", name: "", joined: 0 };
+    return { user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0, last_topic: null, last_page: null, last_draw_time: 0, unlocked: "[]", name: "", joined: 0 };
   }
 
   async ensureUser(userId, name) {
@@ -143,16 +148,26 @@ export class CreditManager extends DurableObject {
     return r.rowsWritten > 0;
   }
 
+  async canDraw(userId) {
+    const r = this.ctx.storage.sql.exec(
+      `SELECT last_draw_time FROM credits WHERE user_id = ?`, userId
+    ).one();
+    if (!r || !r.last_draw_time) return true;
+    return (Date.now() - r.last_draw_time) >= DRAW_COOLDOWN_MS;
+  }
+
   async recordEstekhare(userId, topic, page) {
     const now = new Date().toISOString();
     this.ctx.storage.sql.exec(
-      `INSERT INTO credits (user_id, amount, total_estekhare, last_topic, last_page, last_updated) VALUES (?, 0, 1, ?, ?, ?)
+      `INSERT INTO credits (user_id, amount, total_estekhare, last_topic, last_page, last_draw_time, last_updated) 
+       VALUES (?, 0, 1, ?, ?, ?, ?)
        ON CONFLICT(user_id) DO UPDATE SET
          total_estekhare = total_estekhare + 1,
          last_topic = excluded.last_topic,
          last_page = excluded.last_page,
+         last_draw_time = excluded.last_draw_time,
          last_updated = excluded.last_updated`,
-      userId, topic, page, now
+      userId, topic, page, Date.now(), now
     );
   }
 
@@ -221,6 +236,12 @@ function isUserAllowed(env, chatId) {
   return list.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)).includes(chatId);
 }
 
+function isUserAdmin(env, chatId) {
+  const list = (env.ADMIN_USERS || "").trim();
+  if (!list) return false;
+  return list.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)).includes(chatId);
+}
+
 function pickIndex() {
   const b = new Uint32Array(1);
   crypto.getRandomValues(b);
@@ -249,7 +270,55 @@ function topicBlockV5(r, t) {
     action: ["💪 به پیام محوری آیه توجه کن و با بررسی دقیق تصمیم بگیر.", "🤝 با یک فرد خبره یا مشاور کارآزموده مشورت کن.", "🤲 صدقه بده و با توکل بر خدا اقدام کن."] };
 }
 
-// ========== 5. KEYBOARDS ==========
+// ========== 5. ADMIN HELPERS ==========
+async function broadcast(env, text) {
+  let cursor;
+  let sent = 0, failed = 0;
+  for (;;) {
+    const page = await env.USERS_KV.list({ prefix: "user:", cursor });
+    for (const k of page.keys) {
+      const id = parseInt(k.name.slice(5), 10);
+      if (isNaN(id)) continue;
+      const r = await baleCall(env, "sendMessage", { chat_id: id, text, parse_mode: "HTML" });
+      if (r && r.ok) sent++; else failed++;
+    }
+    if (page.list_complete) break;
+    cursor = page.cursor;
+  }
+  return { sent, failed };
+}
+
+async function sendToMany(env, ids, text) {
+  let sent = 0, failed = 0;
+  for (const id of ids) {
+    const r = await baleCall(env, "sendMessage", { chat_id: id, text, parse_mode: "HTML" });
+    if (r && r.ok) sent++; else failed++;
+  }
+  return { sent, failed };
+}
+
+async function listMembers(env) {
+  const members = [];
+  let cursor;
+  for (;;) {
+    const page = await env.USERS_KV.list({ prefix: "user:", cursor });
+    for (const k of page.keys) {
+      const id = parseInt(k.name.slice(5), 10);
+      if (isNaN(id)) continue;
+      let u = {};
+      try {
+        const raw = await env.USERS_KV.get(k.name);
+        if (raw) u = JSON.parse(raw);
+      } catch (e) { /* ignore */ }
+      members.push({ id, name: u.name || "", joined: u.joined || 0 });
+    }
+    if (page.list_complete) break;
+    cursor = page.cursor;
+  }
+  return members;
+}
+
+// ========== 6. KEYBOARDS ==========
 const mainKb = { keyboard: [[{ text: "🔮 استخاره" }], [{ text: "👤 حساب من" }, { text: "🛍 فروشگاه" }]], resize_keyboard: true, is_persistent: true };
 const storeKb = { inline_keyboard: PACKS.map(p => [{ text: p.text, callback_data: "buy:" + p.id }]) };
 const ritualKb = (t) => ({ inline_keyboard: [[{ text: "🤲 خواندم، استخاره کن", callback_data: "draw:" + t }], [{ text: "↩️ انصراف", callback_data: "home" }]] });
@@ -288,7 +357,7 @@ function topicKb(catId) {
   return { inline_keyboard: rows };
 }
 
-// ========== 6. MESSAGE BUILDERS ==========
+// ========== 7. MESSAGE BUILDERS ==========
 function freeMsg(r, t) {
   if (r.free_summary) {
     return [
@@ -338,7 +407,7 @@ function premiumMsg(r, t) {
   ].join("\n");
 }
 
-// ========== 7. HANDLERS ==========
+// ========== 8. HANDLERS ==========
 async function onMessage(env, m, allowedUsers) {
   const chat = m.chat.id;
   const text = (m.text || "").trim();
@@ -346,16 +415,74 @@ async function onMessage(env, m, allowedUsers) {
   if (!isUserAllowed(env, chat)) return sendMessage(env, chat, "🔒 این بات در حال تست خصوصی است.", mainKb);
 
   const stub = getStub(env, chat);
+  const isAdmin = isUserAdmin(env, chat);
 
+  // ===== حالت انتظار ادمین (broadcast/send) =====
+  const awaitingRaw = await env.USERS_KV.get("await:" + chat);
+  if (awaitingRaw && isAdmin) {
+    let awaiting;
+    try { awaiting = JSON.parse(awaitingRaw); } catch { awaiting = { mode: "broadcast" }; }
+    await env.USERS_KV.delete("await:" + chat);
+
+    if (awaiting.mode === "send") {
+      const res = await sendToMany(env, awaiting.ids, text);
+      return sendMessage(env, chat, "📨 ارسال شد.\n✅ موفق: " + toFa(res.sent) + "\n⚠️ ناموفق: " + toFa(res.failed), mainKb);
+    } else {
+      const res = await broadcast(env, text);
+      return sendMessage(env, chat, "📣 پخش شد.\n✅ موفق: " + toFa(res.sent) + "\n⚠️ ناموفق: " + toFa(res.failed), mainKb);
+    }
+  }
+
+  // ===== /start =====
   if (text === "/start") {
     const cleanName = ((m.chat.first_name || "") + " " + (m.chat.last_name || "")).trim();
     const stats = await stub.getStats(chat);
     const isNew = !stats.joined;
     await stub.ensureUser(chat, cleanName);
     if (isNew) await stub.addCredits(chat, 2);
+
+    try {
+      await env.USERS_KV.put("user:" + chat, JSON.stringify({ name: cleanName, joined: Date.now() }));
+    } catch (e) { console.error("KV put error:", e); }
+
     return sendMessage(env, chat, WELCOME, mainKb);
   }
 
+  // ===== دستورات ادمین =====
+  if (text === "/cancel") {
+    if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
+    await env.USERS_KV.delete("await:" + chat);
+    return sendMessage(env, chat, "↩️ لغو شد.", mainKb);
+  }
+
+  if (text === "/notify") {
+    if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
+    await env.USERS_KV.put("await:" + chat, JSON.stringify({ mode: "broadcast" }), { expirationTtl: 300 });
+    return sendMessage(env, chat, "📣 متن پیام رو بفرست تا برای همه ارسال بشه.\n\nلغو: /cancel", mainKb);
+  }
+
+  const mSend = text.match(/^\/send\s+([0-9,\s]+)$/);
+  if (mSend) {
+    if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
+    const ids = mSend[1].split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+    if (!ids.length) return sendMessage(env, chat, "⚠️ لیست ID خالیه.", mainKb);
+    await env.USERS_KV.put("await:" + chat, JSON.stringify({ mode: "send", ids }), { expirationTtl: 300 });
+    return sendMessage(env, chat, "📨 متن رو بفرست تا به " + toFa(ids.length) + " نفر ارسال بشه.\n\nلغو: /cancel", mainKb);
+  }
+
+  if (text === "/members") {
+    if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
+    const members = await listMembers(env);
+    let lines = ["👥 اعضای بات: " + toFa(members.length), ""];
+    members.slice(0, 50).forEach((mm, i) => {
+      const joined = mm.joined ? new Date(mm.joined).toLocaleDateString("fa-IR") : "—";
+      lines.push(toFa(i + 1) + ". " + (mm.name || "بدون نام") + "\n🆔 " + mm.id + "\n📅 " + joined);
+    });
+    if (members.length > 50) lines.push("… و " + toFa(members.length - 50) + " عضو دیگر");
+    return sendMessage(env, chat, lines.join("\n\n"), mainKb);
+  }
+
+  // ===== منوی عادی =====
   if (text === "🔮 استخاره" || text === "/estekhare")
     return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
 
@@ -409,6 +536,13 @@ async function onCallback(env, cq, allowedUsers) {
 
     if (data.startsWith("draw:")) {
       const t = data.slice(5);
+
+      // 🔥 Rate limit check
+      const canDraw = await stub.canDraw(chat);
+      if (!canDraw) {
+        return sendMessage(env, chat, RATE_LIMIT_MSG, ritualKb(t));
+      }
+
       const idx = pickIndex();
       const record = CONTENT[idx];
       await stub.recordEstekhare(chat, t, record.page);
@@ -461,7 +595,7 @@ async function onSuccessfulPayment(env, m) {
     "🎉 پرداخت موفق!\n\n💎 " + toFa(pack.credits + pack.bonus) + " اعتبار به حساب تو اضافه شد.", mainKb);
 }
 
-// ========== 8. MAIN WORKER ==========
+// ========== 9. MAIN WORKER ==========
 export default {
   async fetch(request, env) {
     // ---------- GET ----------
@@ -472,6 +606,10 @@ export default {
         const allowedStr = env.ALLOWED_USERS || "";
         const allowedUsers = allowedStr
           ? allowedStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+          : [];
+        const adminStr = env.ADMIN_USERS || "";
+        const adminUsers = adminStr
+          ? adminStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
           : [];
 
         const existingPages = new Set(CONTENT.map(r => r.page));
@@ -487,7 +625,7 @@ export default {
           .map((entry) => entry[0] + " (×" + entry[1] + ")");
 
         return new Response(JSON.stringify({
-          version: 17,
+          version: 18,
           schema: 5,
           hasToken: !!env.BOT_TOKEN,
           hasKV: !!env.USERS_KV,
@@ -498,6 +636,8 @@ export default {
           missingPages: missingPages,
           duplicatedPages: duplicatedPages,
           wallet: (env.WALLET_TOKEN || "").startsWith("WALLET-TEST") ? "test" : "real",
+          rateLimitMs: DRAW_COOLDOWN_MS,
+          adminsCount: adminUsers.length,
           privateMode: allowedUsers.length > 0 ? allowedUsers.length + " users allowed" : "public (all users)",
         }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
