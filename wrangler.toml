@@ -2,14 +2,26 @@ name = "neshandel-bot"
 main = "index.js"
 compatibility_date = "2024-04-03"
 
+# ========== KV ==========
 [[kv_namespaces]]
 binding = "USERS_KV"
 id = "81218df778704c32ba02d7405bbd3384"
 
+# ========== Durable Objects ==========
 [[durable_objects.bindings]]
 name = "CREDIT_MANAGER"
 class_name = "CreditManager"
 
+# ========== Migrations ==========
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["CreditManager"]
+
+# ========== متغیرهای غیرحساس ==========
+[vars]
+CURRENT_PHASE = "1"
+ALLOWED_USERS = ""
+
+# ========== لاگ‌گیری (اختیاری) ==========
+[observability]
+enabled = true
