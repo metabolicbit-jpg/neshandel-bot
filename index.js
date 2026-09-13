@@ -66,7 +66,6 @@ export class CreditManager extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
 
-    // مرحله ۱: ساخت جدول در نصب‌های جدید
     try {
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS credits (
@@ -86,7 +85,6 @@ export class CreditManager extends DurableObject {
       console.error("DO create table error:", e);
     }
 
-    // مرحله ۲: مهاجرت جدول‌های قدیمی — افزودن ستون‌های جدید (idempotent)
     const tryAlter = (sql) => {
       try { this.ctx.storage.sql.exec(sql); } catch (e) { /* ستون وجود دارد */ }
     };
@@ -165,7 +163,7 @@ export class CreditManager extends DurableObject {
     if (!r || !r.unlocked) return false;
     try {
       const arr = JSON.parse(r.unlocked);
-      return arr.includes(`${page}:${topic}`);
+      return arr.includes(page + ":" + topic);
     } catch { return false; }
   }
 
@@ -175,9 +173,9 @@ export class CreditManager extends DurableObject {
     ).one();
     let arr = [];
     if (r && r.unlocked) {
-      try { arr = JSON.parse(r.unlocked); } catch {}
+      try { arr = JSON.parse(r.unlocked); } catch (e) { /* ignore */ }
     }
-    const key = `${page}:${topic}`;
+    const key = page + ":" + topic;
     if (!arr.includes(key)) arr.push(key);
     this.ctx.storage.sql.exec(
       `UPDATE credits SET unlocked = ?, last_updated = ? WHERE user_id = ?`,
@@ -188,14 +186,14 @@ export class CreditManager extends DurableObject {
 
 // ========== 4. HELPERS ==========
 async function baleCall(env, method, payload) {
-  const url = `${API_BASE}/bot${env.BOT_TOKEN}/${method}`;
+  const url = API_BASE + "/bot" + env.BOT_TOKEN + "/" + method;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (!data.ok) console.error(`BaleAPI ${method} error:`, JSON.stringify(data));
+  if (!data.ok) console.error("BaleAPI " + method + " error:", JSON.stringify(data));
   return data;
 }
 
@@ -266,6 +264,7 @@ function catKb() {
   }
   return { inline_keyboard: rows };
 }
+
 function topicKb(catId) {
   const cat = CATEGORIES.find(c => c.id === catId);
   if (!cat) return catKb();
@@ -274,9 +273,15 @@ function topicKb(catId) {
   let pair = null;
   for (const t of visible) {
     const btn = { text: t.label, callback_data: "topic:" + t.id };
-    if (t.label.length > 12) { if (pair) { rows.push([pair]); pair = null; } rows.push([btn]); }
-    else if (pair) { rows.push([pair, btn]); pair = null; }
-    else pair = btn;
+    if (t.label.length > 12) {
+      if (pair) { rows.push([pair]); pair = null; }
+      rows.push([btn]);
+    } else if (pair) {
+      rows.push([pair, btn]);
+      pair = null;
+    } else {
+      pair = btn;
+    }
   }
   if (pair) rows.push([pair]);
   rows.push([{ text: "↩️ بازگشت", callback_data: "cats" }]);
@@ -379,7 +384,7 @@ async function onCallback(env, cq, allowedUsers) {
   const stub = getStub(env, chat);
 
   try {
-    if (data === "home")  return sendMessage(env, chat, "🏠 منوی اصلی", mainKb);
+    if (data === "home") return sendMessage(env, chat, "🏠 منوی اصلی", mainKb);
     if (data === "new" || data === "cats")
       return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
     if (data === "store")
@@ -448,10 +453,10 @@ async function onSuccessfulPayment(env, m) {
   try {
     const done = await env.USERS_KV.get("tx:" + txId);
     if (done) return;
-  } catch {}
+  } catch (e) { /* ignore */ }
   const stub = getStub(env, chat);
   await stub.addCredits(chat, pack.credits + pack.bonus);
-  try { await env.USERS_KV.put("tx:" + txId, JSON.stringify({ pack: pack.id, chat, at: Date.now() })); } catch {}
+  try { await env.USERS_KV.put("tx:" + txId, JSON.stringify({ pack: pack.id, chat, at: Date.now() })); } catch (e) { /* ignore */ }
   return sendMessage(env, chat,
     "🎉 پرداخت موفق!\n\n💎 " + toFa(pack.credits + pack.bonus) + " اعتبار به حساب تو اضافه شد.", mainKb);
 }
@@ -459,43 +464,48 @@ async function onSuccessfulPayment(env, m) {
 // ========== 8. MAIN WORKER ==========
 export default {
   async fetch(request, env) {
+    // ---------- GET ----------
     if (request.method === "GET") {
       const url = new URL(request.url);
-if (url.pathname === "/test") {
-  const allowedStr = env.ALLOWED_USERS || "";
-  const allowedUsers = allowedStr
-    ? allowedStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
-    : [];
-  
-  // پیدا کردن صفحات غایب
-  const existingPages = new Set(CONTENT.map(r => r.page));
-  const missingPages = [];
-  for (let i = 1; i <= 603; i += 2) {
-    if (!existingPages.has(i)) missingPages.push(i);
-  }
-  
-  // پیدا کردن صفحات تکراری
-  const pageCounts = {};
-  CONTENT.forEach(r => { pageCounts[r.page] = (pageCounts[r.page] || 0) + 1; });
-  const duplicatedPages = Object.entries(pageCounts)
-    .filter(([_, c]) => c > 1)
-    .map(([p, c]) => `${p} (×${c})`);
-  
-  return new Response(JSON.stringify({
-    version: 17,
-    schema: 5,
-    hasToken: !!env.BOT_TOKEN,
-    hasKV: !!env.USERS_KV,
-    hasDO: !!env.CREDIT_MANAGER,
-    records: CONTENT.length,
-    expectedRecords: 302,
-    missingCount: missingPages.length,
-    missingPages: missingPages,
-    duplicatedPages: duplicatedPages,
-    wallet: (env.WALLET_TOKEN || "").startsWith("WALLET-TEST") ? "test" : "real",
-    privateMode: allowedUsers.length > 0 ? allowedUsers.length + " users allowed" : "public (all users)",
-  }, null, 2), { headers: { "Content-Type": "application/json" } });
-}
+
+      if (url.pathname === "/test") {
+        const allowedStr = env.ALLOWED_USERS || "";
+        const allowedUsers = allowedStr
+          ? allowedStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+          : [];
+
+        const existingPages = new Set(CONTENT.map(r => r.page));
+        const missingPages = [];
+        for (let i = 1; i <= 603; i += 2) {
+          if (!existingPages.has(i)) missingPages.push(i);
+        }
+
+        const pageCounts = {};
+        CONTENT.forEach(r => { pageCounts[r.page] = (pageCounts[r.page] || 0) + 1; });
+        const duplicatedPages = Object.entries(pageCounts)
+          .filter((entry) => entry[1] > 1)
+          .map((entry) => entry[0] + " (×" + entry[1] + ")");
+
+        return new Response(JSON.stringify({
+          version: 17,
+          schema: 5,
+          hasToken: !!env.BOT_TOKEN,
+          hasKV: !!env.USERS_KV,
+          hasDO: !!env.CREDIT_MANAGER,
+          records: CONTENT.length,
+          expectedRecords: 302,
+          missingCount: missingPages.length,
+          missingPages: missingPages,
+          duplicatedPages: duplicatedPages,
+          wallet: (env.WALLET_TOKEN || "").startsWith("WALLET-TEST") ? "test" : "real",
+          privateMode: allowedUsers.length > 0 ? allowedUsers.length + " users allowed" : "public (all users)",
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+
+      return new Response("ok");
+    }
+
+    // ---------- POST ----------
     if (request.method === "POST") {
       try {
         const u = await request.json();
@@ -503,12 +513,21 @@ if (url.pathname === "/test") {
         const allowedUsers = allowedStr
           ? allowedStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
           : [];
-        if (u.pre_checkout_query) await onPreCheckout(env, u.pre_checkout_query);
-        else if (u.message && u.message.successful_payment) await onSuccessfulPayment(env, u.message);
-        else if (u.message) await onMessage(env, u.message, allowedUsers);
-        else if (u.callback_query) await onCallback(env, u.callback_query, allowedUsers);
-      } catch (e) { console.error("Fetch error:", e); }
+
+        if (u.pre_checkout_query) {
+          await onPreCheckout(env, u.pre_checkout_query);
+        } else if (u.message && u.message.successful_payment) {
+          await onSuccessfulPayment(env, u.message);
+        } else if (u.message) {
+          await onMessage(env, u.message, allowedUsers);
+        } else if (u.callback_query) {
+          await onCallback(env, u.callback_query, allowedUsers);
+        }
+      } catch (e) {
+        console.error("Fetch error:", e);
+      }
     }
+
     return new Response("ok");
   },
 };
