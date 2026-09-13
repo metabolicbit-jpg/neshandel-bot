@@ -65,20 +65,38 @@ const ALIAS = { trade:"transaction", business2:"business" };
 export class CreditManager extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS credits (
-        user_id TEXT PRIMARY KEY,
-        amount INTEGER NOT NULL DEFAULT 0,
-        total_estekhare INTEGER NOT NULL DEFAULT 0,
-        total_opens INTEGER NOT NULL DEFAULT 0,
-        last_topic TEXT,
-        last_page INTEGER,
-        unlocked TEXT DEFAULT '[]',
-        name TEXT DEFAULT '',
-        joined INTEGER DEFAULT 0,
-        last_updated TEXT NOT NULL
-      );
-    `);
+
+    // مرحله ۱: ساخت جدول در نصب‌های جدید
+    try {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS credits (
+          user_id TEXT PRIMARY KEY,
+          amount INTEGER NOT NULL DEFAULT 0,
+          total_estekhare INTEGER NOT NULL DEFAULT 0,
+          total_opens INTEGER NOT NULL DEFAULT 0,
+          last_topic TEXT,
+          last_page INTEGER,
+          unlocked TEXT DEFAULT '[]',
+          name TEXT DEFAULT '',
+          joined INTEGER DEFAULT 0,
+          last_updated TEXT NOT NULL
+        );
+      `);
+    } catch (e) {
+      console.error("DO create table error:", e);
+    }
+
+    // مرحله ۲: مهاجرت جدول‌های قدیمی — افزودن ستون‌های جدید (idempotent)
+    const tryAlter = (sql) => {
+      try { this.ctx.storage.sql.exec(sql); } catch (e) { /* ستون وجود دارد */ }
+    };
+    tryAlter(`ALTER TABLE credits ADD COLUMN total_estekhare INTEGER NOT NULL DEFAULT 0`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN total_opens INTEGER NOT NULL DEFAULT 0`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN last_topic TEXT`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN last_page INTEGER`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN unlocked TEXT DEFAULT '[]'`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN name TEXT DEFAULT ''`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN joined INTEGER DEFAULT 0`);
   }
 
   async getStats(userId) {
@@ -177,14 +195,12 @@ async function baleCall(env, method, payload) {
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (!data.ok) console.error(`BaleAPI ${method} error:`, data);
+  if (!data.ok) console.error(`BaleAPI ${method} error:`, JSON.stringify(data));
   return data;
 }
 
 const sendMessage = (env, chat_id, text, reply_markup) =>
   baleCall(env, "sendMessage", { chat_id, text, parse_mode: "HTML", reply_markup });
-const sendPlain = (env, chat_id, text, reply_markup) =>
-  baleCall(env, "sendMessage", { chat_id, text, reply_markup });
 const answerCallback = (env, id) =>
   baleCall(env, "answerCallbackQuery", { callback_query_id: id });
 const sendInvoice = (env, chat_id, pack) =>
@@ -267,11 +283,11 @@ function topicKb(catId) {
   return { inline_keyboard: rows };
 }
 
-// ========== 6. MESSAGE BUILDERS (قالب v16) ==========
+// ========== 6. MESSAGE BUILDERS ==========
 function freeMsg(r, t) {
   if (r.free_summary) {
     return [
-      (r.intro || "سلام رفیق عزیزم! 🌿 خوش اومدی به این محفل نورانی. می‌دونم یه نیت مهم توی دلت داری و اومدی از قرآن راهنمایی بگیری. بیا با هم بشینیم و ببینیم خدا چه پیامی برات فرستاده. یه نفس عمیق بکش و با قلب باز بخون..."), "",
+      (r.intro || "سلام رفیق عزیزم! 🌿"), "",
       "📊 جواب استخاره: " + r.level + " " + r.badge, "",
       "📝 پاسخ کلی به نیت شما:",
       r.free_summary, "",
@@ -284,47 +300,35 @@ function freeMsg(r, t) {
     ].join("\n");
   }
   const B = topicBlockV5(r, t);
-  const teaser = r.premium ? "💎 تحلیل کامل + چک‌لیست مخصوص موضوع تو + کی بروم/کی بایستم…" : (B.tip || "").slice(0, 70) + "…";
   return [
     r.badge + " <b>نتیجه:</b> " + r.verdict,
     "<b>" + (r.headline || "") + "</b>", "",
     "📖 سوره " + r.surah + " — آیهٔ " + toFa(r.ayah) + " (صفحهٔ " + toFa(r.page) + ")",
     r.arabic, "",
     "📜 " + r.translation, "",
-    (r.opener || "بذار این آیه رو بذاریم کنارِ تصمیمت:"),
+    (r.opener || ""),
     (r.plain || ""), "",
-    "🔒 اگه می‌خوای بدونی این آیه دربارهٔ «" + topicInfo(t).label + "» دقیقاً چی می‌گه:",
-    teaser,
+    (r.cta_free || ""),
   ].join("\n");
 }
 
 function premiumMsg(r, t) {
-  if (r.core_message) {
-    const B = topicBlockV5(r, t);
-    const L = topicInfo(t).label;
-    return [
-      "💎 استخاره تخصصی | " + L,
-      "نتیجه: " + B.verdict + " " + B.badge, "",
-      "💎 پیام محوری و منطوق آیه:",
-      r.core_message, "",
-      "💡 نکته و رمز آیه:",
-      B.tip || "", "",
-      "⚠️ زنگ خطر / هشدار:",
-      B.warning || "", "",
-      "🛠 راهکار عملیاتی:",
-      renderAction(B.action), "",
-      "🌟 جمع‌بندی نهایی استخاره صفحه " + toFa(r.page) + ":",
-      (r.final_summary || ""), "",
-      (r.cta_dua || ""), "",
-      DISCLAIMER,
-    ].join("\n");
-  }
   const B = topicBlockV5(r, t);
+  const L = topicInfo(t).label;
   return [
-    "🔓 <b>برداشت تخصصی «" + topicInfo(t).label + "»</b>", "",
-    "⚖️ " + (B.verdict || r.verdict), "",
-    "🎯 <b>اقدام:</b> " + renderAction(B.action),
-    "🛡 <b>احتیاط:</b> " + (B.warning || ""), "",
+    "💎 استخاره تخصصی | " + L,
+    "نتیجه: " + B.verdict + " " + B.badge, "",
+    "💎 پیام محوری و منطوق آیه:",
+    r.core_message || "", "",
+    "💡 نکته و رمز آیه:",
+    B.tip || "", "",
+    "⚠️ زنگ خطر / هشدار:",
+    B.warning || "", "",
+    "🛠 راهکار عملیاتی:",
+    renderAction(B.action), "",
+    "🌟 جمع‌بندی نهایی استخاره صفحه " + toFa(r.page) + ":",
+    (r.final_summary || ""), "",
+    (r.cta_dua || ""), "",
     DISCLAIMER,
   ].join("\n");
 }
@@ -334,7 +338,7 @@ async function onMessage(env, m, allowedUsers) {
   const chat = m.chat.id;
   const text = (m.text || "").trim();
 
-  if (!isUserAllowed(env, chat)) return sendMessage(env, chat, "🔒 این بات در حال تست خصوصی است.\n\nبه‌زودی برای همه فعال می‌شود. 🌿", mainKb);
+  if (!isUserAllowed(env, chat)) return sendMessage(env, chat, "🔒 این بات در حال تست خصوصی است.", mainKb);
 
   const stub = getStub(env, chat);
 
@@ -374,53 +378,58 @@ async function onCallback(env, cq, allowedUsers) {
 
   const stub = getStub(env, chat);
 
-  if (data === "home")  return sendMessage(env, chat, "🏠 منوی اصلی", mainKb);
-  if (data === "new" || data === "cats")
-    return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
-  if (data === "store")
-    return sendMessage(env, chat, STORE_MSG, storeKb);
+  try {
+    if (data === "home")  return sendMessage(env, chat, "🏠 منوی اصلی", mainKb);
+    if (data === "new" || data === "cats")
+      return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
+    if (data === "store")
+      return sendMessage(env, chat, STORE_MSG, storeKb);
 
-  if (data.startsWith("cat:")) {
-    const cat = CATEGORIES.find(c => c.id === data.slice(4));
-    if (!cat) return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
-    return sendMessage(env, chat, "📂 دستهٔ «" + cat.full + "» — موضوعت رو انتخاب کن:", topicKb(cat.id));
-  }
+    if (data.startsWith("cat:")) {
+      const cat = CATEGORIES.find(c => c.id === data.slice(4));
+      if (!cat) return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
+      return sendMessage(env, chat, "📂 دستهٔ «" + cat.full + "» — موضوعت رو انتخاب کن:", topicKb(cat.id));
+    }
 
-  if (data.startsWith("buy:")) {
-    const pack = PACKS.find(p => p.id === data.slice(4));
-    if (!pack) return sendMessage(env, chat, "⚠️ بسته پیدا نشد.", mainKb);
-    return sendInvoice(env, chat, pack);
-  }
+    if (data.startsWith("buy:")) {
+      const pack = PACKS.find(p => p.id === data.slice(4));
+      if (!pack) return sendMessage(env, chat, "⚠️ بسته پیدا نشد.", mainKb);
+      return sendInvoice(env, chat, pack);
+    }
 
-  if (data.startsWith("topic:")) {
-    const t = data.slice(6);
-    return sendMessage(env, chat, RITUAL, ritualKb(t));
-  }
+    if (data.startsWith("topic:")) {
+      const t = data.slice(6);
+      return sendMessage(env, chat, RITUAL, ritualKb(t));
+    }
 
-  if (data.startsWith("draw:")) {
-    const t = data.slice(5);
-    const idx = pickIndex();
-    const record = CONTENT[idx];
-    await stub.recordEstekhare(chat, t, record.page);
-    await sendMessage(env, chat, "🔮 در حال انجام استخاره...");
-    return sendMessage(env, chat, freeMsg(record, t), resultKb(t));
-  }
+    if (data.startsWith("draw:")) {
+      const t = data.slice(5);
+      const idx = pickIndex();
+      const record = CONTENT[idx];
+      await stub.recordEstekhare(chat, t, record.page);
+      await sendMessage(env, chat, "🔮 در حال انجام استخاره...");
+      return sendMessage(env, chat, freeMsg(record, t), resultKb(t));
+    }
 
-  if (data.startsWith("unlock:") || data.startsWith("view:")) {
-    const t = data.slice(data.indexOf(":") + 1);
-    const stats = await stub.getStats(chat);
-    const page = stats.last_page;
-    const record = CONTENT.find(r => r.page === page);
-    if (!record) return sendMessage(env, chat, "⚠️ خطای کوچک؛ لطفاً یک استخارهٔ جدید بگیر.", mainKb);
+    if (data.startsWith("unlock:") || data.startsWith("view:")) {
+      const t = data.slice(data.indexOf(":") + 1);
+      const stats = await stub.getStats(chat);
+      const page = stats.last_page;
+      const record = CONTENT.find(r => r.page === page);
+      if (!record) return sendMessage(env, chat, "⚠️ خطای کوچک؛ لطفاً یک استخارهٔ جدید بگیر.", mainKb);
 
-    const alreadyUnlocked = await stub.isUnlocked(chat, page, t);
-    if (alreadyUnlocked) return sendMessage(env, chat, premiumMsg(record, t), unlockedKb(t));
+      const alreadyUnlocked = await stub.isUnlocked(chat, page, t);
+      if (alreadyUnlocked) return sendMessage(env, chat, premiumMsg(record, t), unlockedKb(t));
 
-    const ok = await stub.deductCredit(chat);
-    if (!ok) return sendMessage(env, chat, NO_CREDIT_MSG, noCreditKb);
+      const ok = await stub.deductCredit(chat);
+      if (!ok) return sendMessage(env, chat, NO_CREDIT_MSG, noCreditKb);
 
-    await stub.markUnlocked(chat, page, t);
-    return sendMessage(env, chat, premiumMsg(record, t), unlockedKb(t));
+      await stub.markUnlocked(chat, page, t);
+      return sendMessage(env, chat, premiumMsg(record, t), unlockedKb(t));
+    }
+  } catch (e) {
+    console.error("onCallback error:", e);
+    return sendMessage(env, chat, "⚠️ خطایی رخ داد. لطفاً دوباره تلاش کن.", mainKb);
   }
 }
 
@@ -458,7 +467,7 @@ export default {
           ? allowedStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
           : [];
         return new Response(JSON.stringify({
-          version: 16,
+          version: 17,
           schema: 5,
           hasToken: !!env.BOT_TOKEN,
           hasKV: !!env.USERS_KV,
