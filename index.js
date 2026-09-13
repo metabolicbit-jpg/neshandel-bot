@@ -5,7 +5,7 @@ import { CONTENT } from "./content/index.js";
 // ========== 2. CONSTANTS ==========
 const API_BASE = "https://tapi.bale.ai";
 const DRAW_COOLDOWN_MS = 5000;
-const DO_VERSION_PREFIX = "v2:";  // ← تغییر: prefix برای DO جدید
+const DO_VERSION_PREFIX = "v2:";
 
 const CATEGORIES = [
   { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
@@ -60,6 +60,7 @@ const STORE_MSG = "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n
 const NO_CREDIT_MSG = "🌿 دوست عزیز، اعتبارت تموم شده.\n\nبرای دیدن استخارهٔ تخصصی همین موضوع، یکی از بسته‌ها رو انتخاب کن؛ کمتر از یک دقیقه شارژ می‌شه. 🌙";
 const RATE_LIMIT_MSG = "⏳ لطفاً چند لحظه صبر کن و بعد دوباره استخاره بگیر.";
 const ADMIN_ONLY_MSG = "⛔ این فرمان فقط برای مدیر بات قابل دسترسی است.";
+const START_ERROR_MSG = "⚠️ خطا در ثبت‌نام. لطفاً دوباره /start بزن.";
 
 const toFa = n => String(n).replace(/\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
 const ALIAS = { trade:"transaction", business2:"business" };
@@ -109,15 +110,33 @@ export class CreditManager extends DurableObject {
     return { user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0, last_topic: null, last_page: null, last_draw_time: 0, unlocked: "[]", name: "", joined: 0 };
   }
 
+  // ✅ نسخهٔ اصلاح‌شده — بدون CASE WHEN (که در DO SQLite پشتیبانی نمی‌شه)
   async ensureUser(userId, name) {
     const now = new Date().toISOString();
-    this.ctx.storage.sql.exec(
-      `INSERT INTO credits (user_id, amount, name, joined, last_updated) VALUES (?, 0, ?, ?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET
-         name = CASE WHEN excluded.name != '' THEN excluded.name ELSE credits.name END,
-         last_updated = excluded.last_updated`,
-      userId, name || "", Date.now(), now
-    );
+    const trimmedName = (name || "").trim();
+
+    const existing = this.ctx.storage.sql.exec(
+      `SELECT user_id FROM credits WHERE user_id = ?`, userId
+    ).one();
+
+    if (existing) {
+      if (trimmedName) {
+        this.ctx.storage.sql.exec(
+          `UPDATE credits SET name = ?, last_updated = ? WHERE user_id = ?`,
+          trimmedName, now, userId
+        );
+      } else {
+        this.ctx.storage.sql.exec(
+          `UPDATE credits SET last_updated = ? WHERE user_id = ?`,
+          now, userId
+        );
+      }
+    } else {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO credits (user_id, amount, name, joined, last_updated) VALUES (?, 0, ?, ?, ?)`,
+        userId, trimmedName, Date.now(), now
+      );
+    }
   }
 
   async getCredits(userId) {
@@ -156,7 +175,7 @@ export class CreditManager extends DurableObject {
       return (Date.now() - r.last_draw_time) >= DRAW_COOLDOWN_MS;
     } catch (e) {
       console.error("canDraw error:", e);
-      return true;  // اگر خطا داد، اجازه بده (safe fallback)
+      return true;
     }
   }
 
@@ -229,7 +248,6 @@ const sendInvoice = (env, chat_id, pack) =>
 const answerPreCheckout = (env, id, ok, error_message) =>
   baleCall(env, "answerPreCheckoutQuery", { pre_checkout_query_id: id, ok, ...(error_message ? { error_message } : {}) });
 
-// 🔥 نکته کلیدی: DO جدید با prefix v2
 function getStub(env, userId) {
   const id = env.CREDIT_MANAGER.idFromName(DO_VERSION_PREFIX + String(userId));
   return env.CREDIT_MANAGER.get(id);
@@ -444,6 +462,7 @@ async function onMessage(env, m, allowedUsers) {
       const cleanName = ((m.chat.first_name || "") + " " + (m.chat.last_name || "")).trim();
       const stats = await stub.getStats(chat);
       const isNew = !stats.joined;
+
       await stub.ensureUser(chat, cleanName);
       if (isNew) await stub.addCredits(chat, 2);
 
@@ -454,7 +473,7 @@ async function onMessage(env, m, allowedUsers) {
       return sendMessage(env, chat, WELCOME, mainKb);
     } catch (e) {
       console.error("/start error:", e);
-      return sendMessage(env, chat, "⚠️ خطا در ثبت‌نام. لطفاً دوباره /start بزن.", mainKb);
+      return sendMessage(env, chat, START_ERROR_MSG, mainKb);
     }
   }
 
@@ -482,14 +501,19 @@ async function onMessage(env, m, allowedUsers) {
 
   if (text === "/members") {
     if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
-    const members = await listMembers(env);
-    let lines = ["👥 اعضای بات: " + toFa(members.length), ""];
-    members.slice(0, 50).forEach((mm, i) => {
-      const joined = mm.joined ? new Date(mm.joined).toLocaleDateString("fa-IR") : "—";
-      lines.push(toFa(i + 1) + ". " + (mm.name || "بدون نام") + "\n🆔 " + mm.id + "\n📅 " + joined);
-    });
-    if (members.length > 50) lines.push("… و " + toFa(members.length - 50) + " عضو دیگر");
-    return sendMessage(env, chat, lines.join("\n\n"), mainKb);
+    try {
+      const members = await listMembers(env);
+      let lines = ["👥 اعضای بات: " + toFa(members.length), ""];
+      members.slice(0, 50).forEach((mm, i) => {
+        const joined = mm.joined ? new Date(mm.joined).toLocaleDateString("fa-IR") : "—";
+        lines.push(toFa(i + 1) + ". " + (mm.name || "بدون نام") + "\n🆔 " + mm.id + "\n📅 " + joined);
+      });
+      if (members.length > 50) lines.push("… و " + toFa(members.length - 50) + " عضو دیگر");
+      return sendMessage(env, chat, lines.join("\n\n"), mainKb);
+    } catch (e) {
+      console.error("/members error:", e);
+      return sendMessage(env, chat, "⚠️ خطا در دریافت لیست اعضا.", mainKb);
+    }
   }
 
   // ===== منوی عادی =====
@@ -638,7 +662,7 @@ export default {
           .map((entry) => entry[0] + " (×" + entry[1] + ")");
 
         return new Response(JSON.stringify({
-          version: 19,
+          version: 20,
           schema: 5,
           doPrefix: DO_VERSION_PREFIX,
           hasToken: !!env.BOT_TOKEN,
