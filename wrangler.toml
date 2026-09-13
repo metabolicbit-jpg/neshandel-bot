@@ -1,18 +1,15 @@
 name = "neshandel-bot"
 main = "index.js"
-compatibility_date = "2024-04-03" # برای پشتیبانی از RPC در Durable Objects
+compatibility_date = "2024-04-03"
 
-# ========== KV (برای داده‌های غیرحساس مثل تاریخچه و لاگ) ==========
 [[kv_namespaces]]
 binding = "USERS_KV"
-id = "81218df778704c32ba02d7405bbd3384" # شناسه‌ی KV فعلی خود را اینجا بگذارید
+id = "81218df778704c32ba02d7405bbd3384"
 
-# ========== Durable Objects (برای مدیریت اتمیک اعتبار) ==========
 [[durable_objects.bindings]]
 name = "CREDIT_MANAGER"
 class_name = "CreditManager"
 
-# ========== مایگریشن (برای ساخت کلاس Durable Object در پلن رایگان) ==========
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["CreditManager"]​​
+new_sqlite_classes = ["CreditManager"]
