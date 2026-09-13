@@ -1,508 +1,374 @@
-// ── neshandel-bot — نسخه ۱۶: قالب تأییدشده + Schema v5
-// تغییرات نسبت به نسخه ۱۵:
-// ۱) freeMsg: قالب جدید رایگان با intro و cta_free (fallback به cta و سلام پیش‌فرض)
-// ۲) premiumMsg: چاپ core_message (شامل ۳ عبارت کلیدی + «علت تأیید/رد استخاره»)
-//    + راهکار عملیاتی به‌صورت بولت ۳ مرحله‌ای (action آرایه‌ای) + cta_dua پیش از سلب مسئولیت
-// ۳) topicBlockV5 جایگزین topicBlockV4 شد؛ action رشته‌ای و آرایه‌ای هر دو پشتیبانی می‌شود
-// ۴) endpoint /test اکنون نسخه و schema را هم گزارش می‌کند
-import { CONTENT } from "./content/index.js";
+// ========== 1. IMPORT ==========
+import { DurableObject } from "cloudflare:workers";
 
-let TOKEN = "";
-let WALLET_TOKEN = "";
-const BASE = "https://tapi.bale.ai";
+// ========== 2. CONSTANTS ==========
+const BOT_TOKEN = "YOUR_BOT_TOKEN"; // در پروداکشن از Secrets استفاده کنید
+const API_BASE = "https://tapi.bale.ai";
+const ALLOWED_USERS = []; // در صورت خالی بودن، بات عمومی می‌شود
+const CONTENT = []; // آرایه‌ی محتوای استخاره (از فایل‌های pXXX-XXX.js ایمپورت می‌شود)
 
-// ── API بله
-async function baleCall(method, payload){
-  const res = await fetch(`${BASE}/bot${TOKEN}/${method}`, {
-    method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
-  return res.json();
-}
-const sendMessage = (chat_id, text, reply_markup) =>
-  baleCall("sendMessage", { chat_id, text, parse_mode:"HTML", reply_markup });
-const sendPlain = (chat_id, text, reply_markup) =>
-  baleCall("sendMessage", { chat_id, text, reply_markup });
-const answerCallback = (id) => baleCall("answerCallbackQuery", { callback_query_id: id });
-const sendInvoice = (chat_id, pack) => baleCall("sendInvoice", {
-  chat_id, title: pack.title, description: pack.desc, payload: pack.id,
-  provider_token: WALLET_TOKEN, prices: [{ label: pack.label, amount: pack.rials }]
-});
-const answerPreCheckout = (id, ok, error_message) =>
-  baleCall("answerPreCheckoutQuery", { pre_checkout_query_id:id, ok, ...(error_message?{error_message}:{}) });
-
-// ── بسته‌های فروشگاه (مدال‌دار — مطابق اسکرین‌شات)
-const PACKS = [
-  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — ۱۰ استخارهٔ تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰,۰۰۰ تومان" },
-  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",  label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",          text:"🥈 ۳۵ اعتبار — ۵۰,۰۰۰ تومان" },
-  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",        text:"🥇 ۱۲۰ اعتبار — ۱۵۰,۰۰۰ تومان" },
-];
-const storeKb = { inline_keyboard: PACKS.map(p=>[{ text:p.text, callback_data:"buy:"+p.id }]) };
-
-// ── دسته‌بندی موضوعات (۲۲ موضوع) + فازبندی آینده‌نگر
-const CURRENT_PHASE = 1;
-const CATEGORIES = [
-  { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
-    { id:"marriage",   label:"🤵👰 ازدواج",   short:"ازدواج" },
-    { id:"proposal",   label:"💐 خواستگاری", short:"خواستگاری", phase:2 },
-    { id:"childbirth", label:"🤰 فرزندآوری", short:"فرزندآوری", phase:2 },
-    { id:"divorce",    label:"💔 طلاق",      short:"طلاق", hidden:true },
-    { id:"breakup",    label:"❌ فسخ",       short:"فسخ", hidden:true },
-    { id:"reconcile",  label:"🕊️ آشتی",     short:"آشتی", phase:2 },
-  ]},
-  { id:"business", label:"💼 کسب‌وکار", full:"شغل و کسب‌وکار", topics:[
-    { id:"work",        label:"💼 کار",       short:"کار" },
-    { id:"trade",       label:"💰 معامله",    short:"معامله" },
-    { id:"partnership", label:"🤝 شراکت",     short:"شراکت", phase:2 },
-    { id:"investment",  label:"📈 سرمایه‌گذاری", short:"سرمایه‌گذاری" },
-    { id:"resign",      label:"🚪 استعفا",    short:"استعفا", phase:2 },
-    { id:"business2",   label:"🏪 کسب شخصی", short:"کسب شخصی", phase:2, key:"business" },
-    { id:"legal",       label:"⚖️ حقوقی",    short:"حقوقی", phase:2 },
-    { id:"loan",        label:"💳 وام",       short:"وام", phase:2 },
-  ]},
-  { id:"asset", label:"🏠 دارایی", full:"دارایی و ملک", topics:[
-    { id:"home",      label:"🏠 خانه",  short:"خانه" },
-    { id:"car",       label:"🚗 خودرو", short:"خودرو" },
-    { id:"guarantee", label:"💸 ضمانت", short:"ضمانت", phase:2 },
-  ]},
-  { id:"travel", label:"✈️ سفر", full:"سفر و جابجایی", topics:[
-    { id:"travel",    label:"✈️ سفر",    short:"سفر" },
-    { id:"migration", label:"🌍 مهاجرت", short:"مهاجرت" },
-    { id:"moving",    label:"📦 جابجایی", short:"جابجایی", phase:2 },
-  ]},
-  { id:"study", label:"🎓 تحصیل", full:"تحصیل", topics:[
-    { id:"study", label:"🎓 تحصیل", short:"تحصیل" },
-  ]},
-  { id:"health", label:"🩺 سلامت", full:"سلامت", topics:[
-    { id:"health", label:"🩺 سلامتی", short:"سلامتی" },
-  ]},
-];
-
-// ── کیبوردها
-const mainKb = { keyboard:[[ {text:"🔮 استخاره"} ],[ {text:"👤 حساب من"},{text:"🛍 فروشگاه"} ]], resize_keyboard:true, is_persistent:true };
-const ritualKb = (t)=>({ inline_keyboard:[
-  [{text:"🤲 خواندم، استخاره کن",callback_data:"draw:"+t}],
-  [{text:"↩️ انصراف",callback_data:"home"}]
-]});
-const resultKb = (t)=>({ inline_keyboard:[
-  [{text:premiumBtn(t),callback_data:"unlock:"+t}],
-  [{text:"🔮 استخاره جدید",callback_data:"new"}]
-]});
-const unlockedKb = (t)=>({ inline_keyboard:[
-  [{text:"📖 مشاهدهٔ استخاره تخصصی",callback_data:"view:"+t}],
-  [{text:"🔮 استخاره جدید",callback_data:"new"}]
-]});
-const noCreditKb = { inline_keyboard:[
-  [{text:"🛍 مشاهدهٔ بسته‌ها",callback_data:"store"}],
-  [{text:"🔮 استخاره جدید",callback_data:"new"}]
-]};
-
-function catKb(){
-  const rows=[];
-  for(let i=0;i<CATEGORIES.length;i+=2){
-    rows.push(CATEGORIES.slice(i,i+2).map(c=>({text:c.label,callback_data:"cat:"+c.id})));
-  }
-  return {inline_keyboard:rows};
-}
-function topicKb(catId){
-  const cat = CATEGORIES.find(c=>c.id===catId);
-  if(!cat) return catKb();
-  const visible = cat.topics.filter(t=>!t.hidden && (t.phase||1)<=CURRENT_PHASE);
-  const rows=[]; let pair=null;
-  for(const t of visible){
-    const btn={text:t.label,callback_data:"topic:"+t.id};
-    if(t.label.length>12){ if(pair){rows.push([pair]);pair=null;} rows.push([btn]); }
-    else if(pair){ rows.push([pair,btn]); pair=null; }
-    else pair=btn;
-  }
-  if(pair) rows.push([pair]);
-  rows.push([{text:"↩️ بازگشت",callback_data:"cats"}]);
-  return {inline_keyboard:rows};
-}
-function premiumBtn(t){
-  const txt="💎 استخاره تخصصی "+topicShort(t);
-  return txt.length>30 ? "💎 استخاره تخصصی" : txt;
-}
-
-// ── پیام‌ها
-const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
-const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
-const PRIVATE_MSG = "🔒 این بات در حال تست خصوصی است.\n\nفعلاً فقط کاربران منتخب می‌توانند از آن استفاده کنند.\n\nبه‌زودی برای همه فعال می‌شود. 🌿";
-const ADMIN_ONLY_MSG = "⛔ این فرمان فقط برای مدیر بات قابل دسترسی است.";
-const STORE_MSG = "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = یک استخارهٔ تخصصی با تحلیل کامل موضوع تو\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاد:";
-const NO_CREDIT_MSG = "🌿 دوست عزیز، اعتبارت تموم شده.\n\nبرای دیدن استخارهٔ تخصصی همین موضوع، یکی از بسته‌ها رو انتخاب کن؛ کمتر از یک دقیقه شارژ می‌شه. 🌙";
-const DISCLAIMER = "⚖️ سلب مسئولیت و نکته مهم فقهی: فراموش نکنید که در احکام اسلامی، استخاره جایگزین عقل، تحقیق و مشورت نیست و «وحی منزل» محسوب نمی‌شود. این متن صرفاً یک تفسیر و راهنمای معنوی بر اساس آیات قرآن است. لذا برای تصمیمات حساس زندگی‌تان، حتماً در کنار این استخاره، با متخصصان و مشاوران کارآزمودهٔ آن حوزه مشورت فرمایید. 🤝";
-
-const toFa = n => String(n).replace(/\d/g,d=>"۰۱۲۳۴۵۶۷۸۹"[d]);
-
-// ── جست‌وجوی موضوع
-function topicInfo(id){
-  for(const c of CATEGORIES) for(const t of c.topics) if(t.id===id) return t;
-  return { id, label:"❓ تصمیم دیگر", short:"تصمیم تو" };
-}
-function topicShort(id){ return topicInfo(id).short || "تصمیم تو"; }
-function topicKey(id){ const t=topicInfo(id); return t.key || t.id; }
-
-// ── رندر راهکار عملیاتی (رشتهٔ قدیمی یا آرایهٔ ۳ مرحله‌ای جدید)
-function renderAction(a){
-  if(Array.isArray(a)) return a.map(x=>"-   "+x).join("\n");
-  return a||"";
-}
-
-// ── بلوک موضوع (Schema v5 — سازگار با action رشته/آرایه)
-const ALIAS = { trade:"transaction", business2:"business" };
-function topicBlockV5(r,t){
-  const k = topicKey(t);
-  const T = (r.topics||{})[k] || (r.topics||{})[ALIAS[t]];
-  if(T) return T;
-  return { verdict:r.level||r.verdict||"میانه", badge:r.badge||"⚖️",
-    tip:r.core_message||"",
-    warning:"این موضوع به‌صورت اختصاصی برای این صفحه تفسیر نشده؛ با احتیاط و مشورت پیش برو.",
-    action:["💪 به پیام محوری آیه توجه کن و با بررسی دقیق تصمیم بگیر.","🤝 با یک فرد خبره یا مشاور کارآزموده مشورت کن.","🤲 صدقه بده و با توکل بر خدا اقدام کن."] };
-}
-
-// ── بلوک موضوع (Schema قدیمی — پشتیبان)
-function topicBlock(r,t){
-  const k = topicKey(t);
-  const T = (r.topics||{})[k] || (r.topics||{})[ALIAS[t]];
-  if(T) return T;
-  return {
-    verdict: r.verdict || r.level || "میانه",
-    badge:   r.badge  || "⚖️",
-    guidance:r.key    || "",
-    action:  r.action || "",
-    tip:     r.key    || "",
-    warning: r.caution|| ""
-  };
-}
-
-// ── رندر نسخهٔ رایگان (قالب تأییدشدهٔ v16) ─────────────────────────
-function freeMsg(r,t){
-  // ── مسیر اصلی: رکوردهای Schema v5 (دارای free_summary)
-  if(r.free_summary){
-    return [
-      (r.intro||"سلام رفیق عزیزم! 🌿 خوش اومدی به این محفل نورانی. می‌دونم یه نیت مهم توی دلت داری و اومدی از قرآن راهنمایی بگیری. بیا با هم بشینیم و ببینیم خدا چه پیامی برات فرستاده. یه نفس عمیق بکش و با قلب باز بخون..."),"",
-      "📊 جواب استخاره: "+r.level+" "+r.badge,"",
-      "📝 پاسخ کلی به نیت شما:",
-      r.free_summary,"",
-      "📖 آیه اول سرصفحه (صفحه "+toFa(r.page)+" – سوره "+r.surah+"، آیه "+toFa(r.ayah)+"):",
-      r.arabic,"",
-      "🌐 ترجمه روان:",
-      "«"+r.translation+"»","",
-      "📍 سوره "+r.surah+" | آیه "+toFa(r.ayah),"",
-      (r.cta_free||r.cta||"")
-    ].join("\n");
-  }
-  // ── مسیر پشتیبان: رکوردهای قدیمی (بدون تغییر)
-  const B=topicBlock(r,t);
-  const teaser = r.premium ? "💎 تحلیل کامل + چک‌لیست مخصوص موضوع تو + کی بروم/کی بایستم…" : (B.guidance||"").slice(0,70)+"…";
-  return [
-    r.badge+" <b>نتیجه:</b> "+r.verdict,
-    "<b>"+r.headline+"</b>","",
-    "📖 سوره "+r.surah+" — آیهٔ "+toFa(r.ayah)+" (صفحهٔ "+toFa(r.page)+")",
-    r.arabic,"",
-    "📜 "+r.translation,"",
-    (r.opener||"بذار این آیه رو بذاریم کنارِ تصمیمت:"),
-    (r.plain||""),"",
-    "✨ سه چراغ از دلِ آیه:",
-    ...(r.guidance||[]).map(g=>"• "+g),"",
-    "🔒 اگه می‌خوای بدونی این آیه دربارهٔ «"+topicInfo(t).label+"» دقیقاً چی می‌گه:",
-    teaser
-  ].join("\n");
-}
-
-// ── رندر نسخهٔ پولی (قالب تأییدشدهٔ v16) ─────────────────────────
-function premiumMsg(r,t){
-  // ── مسیر اصلی: رکوردهای Schema v5 (دارای core_message)
-  if(r.core_message){
-    const B=topicBlockV5(r,t);
-    const L=topicInfo(t).label;
-    return [
-      "💎 استخاره تخصصی | "+L,
-      "نتیجه: "+B.verdict+" "+B.badge,"",
-      "💎 پیام محوری و منطوق آیه:",
-      r.core_message,"",           // شامل ۳ عبارت کلیدی + «علت تأیید/رد استخاره»
-      "💡 نکته و رمز آیه:",
-      B.tip,"",
-      "⚠️ زنگ خطر / هشدار:",
-      B.warning,"",
-      "🛠 راهکار عملیاتی:",
-      renderAction(B.action),"",
-      "🌟 جمع‌بندی نهایی استخاره صفحه "+toFa(r.page)+":",
-      (r.final_summary||""),"",
-      (r.cta_dua||""),"",
-      DISCLAIMER
-    ].join("\n");
-  }
-  // ── مسیر پشتیبان: رکوردهای قدیمی (بدون تغییر)
-  const T=(r.topics||{})[t]||{};
-  if(r.premium){
-    const P=r.premium;
-    return [
-      "🔓 <b>برداشت تخصصی «"+topicInfo(t).label+"»</b>","",
-      "🧭 <b>جمع‌بندی:</b> "+P.final_verdict,"",
-      "🔍 <b>تحلیل تصمیم:</b>",P.decision_analysis,"",
-      "🟢 <b>نقطهٔ قوت:</b> "+P.strengths,
-      "⚠️ <b>نقطهٔ خطر:</b> "+P.risks,"",
-      "✅ <b>کی جلو بروم؟</b>",...P.go_conditions.map(c=>"• "+c),"",
-      "🛑 <b>کی متوقف شوم؟</b>",...P.stop_conditions.map(c=>"• "+c),"",
-      "📋 <b>چک‌لیست:</b>",...(T.checklist||[]).map(c=>"☐ "+c),"",
-      "💡 "+(T.topic_note||""),
-      "📖 <b>مثال واقعی:</b> "+P.real_example,
-      "⚠️ <b>اشتباه رایج:</b> "+P.common_mistake,"",
-      DISCLAIMER
-    ].join("\n");
-  }
-  const B=topicBlock(r,t);
-  return [
-    "🔓 <b>برداشت تخصصی «"+topicInfo(t).label+"»</b>","",
-    "⚖️ "+(B.verdict||r.verdict),"",B.guidance,"",
-    "🎯 <b>اقدام:</b> "+(B.action||r.action),
-    "🛡 <b>احتیاط:</b> "+r.caution,"",
-    "💎 <i>"+r.key+"</i>","",DISCLAIMER
-  ].join("\n");
-}
-
-// ── KV
-async function getUser(env, chatId){
-  try {
-    const raw = await env.KV.get("u:"+chatId);
-    if (raw) return { u: JSON.parse(raw), exists: true };
-  } catch(e){ console.error("getUser:", e); }
-  return { u: { credits:2, draws:0, unlocks:0, last:-1, topic:"marriage", unlocked:[], name:"", joined:0 }, exists: false };
-}
-async function saveUser(env, chatId, u){
-  try { await env.KV.put("u:"+chatId, JSON.stringify(u)); }
-  catch(e){ console.error("saveUser:", e); }
-}
-
-function pickIndex(){
-  const b = new Uint32Array(1);
-  crypto.getRandomValues(b);
-  return b[0] % CONTENT.length;
-}
-function isAllowed(chatId, allowedUsers){
-  if(allowedUsers.length===0) return true;
-  return allowedUsers.includes(chatId);
-}
-function isAdmin(chatId, allowedUsers){
-  return allowedUsers.includes(chatId);
-}
-
-// ── پخش و ارسال
-async function broadcast(env, text){
-  let cursor, sent=0, failed=0;
-  for(;;){
-    const page = await env.KV.list({prefix:"u:", cursor});
-    for(const k of page.keys){
-      const id = parseInt(k.name.slice(2),10);
-      if(isNaN(id)) continue;
-      const r = await baleCall("sendMessage",{chat_id:id, text});
-      if(r && r.ok) sent++; else failed++;
-    }
-    if(page.list_complete) break;
-    cursor = page.cursor;
-  }
-  return {sent, failed};
-}
-async function sendToMany(env, ids, text){
-  let sent=0, failed=0;
-  for(const id of ids){
-    const r = await baleCall("sendMessage",{chat_id:id, text});
-    if(r && r.ok) sent++; else failed++;
-  }
-  return {sent, failed};
-}
-async function listMembers(env){
-  const members=[];
-  let cursor;
-  for(;;){
-    const page = await env.KV.list({prefix:"u:", cursor});
-    for(const k of page.keys){
-      const id = parseInt(k.name.slice(2),10);
-      if(isNaN(id)) continue;
-      let u={};
-      try{ const raw=await env.KV.get(k.name); if(raw) u=JSON.parse(raw); }catch(e){}
-      members.push({ id, name:u.name||"", credits:u.credits||0, draws:u.draws||0, unlocks:u.unlocks||0, joined:u.joined||0 });
-    }
-    if(page.list_complete) break;
-    cursor = page.cursor;
-  }
-  return members;
-}
-
-// ── handler پیام
-async function onMessage(m, env, allowedUsers){
-  const chat=m.chat.id, text=(m.text||"").trim();
-
-  if(!isAllowed(chat, allowedUsers)) return sendMessage(chat, PRIVATE_MSG, mainKb);
-
-  if(text==="/start"){
-    const cleanName = ((m.chat.first_name||"")+" "+(m.chat.last_name||"")).trim();
-    const {u, exists} = await getUser(env, chat);
-    let save = !exists;
-    if(!u.joined) { u.joined = Date.now(); save = true; }
-    if(cleanName && u.name !== cleanName) { u.name = cleanName; save = true; }
-    if(save) await saveUser(env, chat, u);
-    return sendMessage(chat, WELCOME, mainKb);
+// ========== 3. DURABLE OBJECT CLASS (مدیریت اعتبار) ==========
+export class CreditManager extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    // ساخت جدول SQLite در اولین اجرا (به‌صورت خودکار مدیریت می‌شود)
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS credits (
+        user_id TEXT PRIMARY KEY,
+        amount INTEGER NOT NULL DEFAULT 0,
+        last_updated TEXT NOT NULL
+      );
+    `);
   }
 
-  // ── فرامین ادمین
-  if(text==="/cancel"){
-    if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
-    await env.KV.delete("await:"+chat);
-    return sendMessage(chat,"↩️ لغو شد.");
-  }
-  if(text==="/notify"){
-    if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
-    await env.KV.put("await:"+chat, JSON.stringify({mode:"broadcast"}), {expirationTtl:300});
-    return sendMessage(chat,"📣 متن نوتیفیکیشن را بفرست تا برای همهٔ اعضا ارسال شود.\nلغو: /cancel");
-  }
-  const mSend = text.match(/^\/send\s+([0-9,]+)\s*$/);
-  if(mSend){
-    if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
-    const ids = mSend[1].split(",").map(s=>parseInt(s,10)).filter(n=>!isNaN(n));
-    await env.KV.put("await:"+chat, JSON.stringify({mode:"send", ids}), {expirationTtl:300});
-    return sendMessage(chat,"📨 متن را بفرست تا به "+toFa(ids.length)+" نفر ارسال شود.\nلغو: /cancel");
-  }
-  if(text==="/members"){
-    if(!isAdmin(chat, allowedUsers)) return sendMessage(chat, ADMIN_ONLY_MSG, mainKb);
-    const members = await listMembers(env);
-    let lines = ["👥 اعضای بات: "+toFa(members.length),""];
-    members.slice(0,50).forEach((mm,i)=>{
-      const joined = mm.joined ? new Date(mm.joined).toLocaleDateString("fa-IR") : "—";
-      lines.push(toFa(i+1)+". "+(mm.name||"بدون نام")+"\n🆔 "+mm.id+"\n💎 "+toFa(mm.credits)+" | 🔮 "+toFa(mm.draws)+" | 🔓 "+toFa(mm.unlocks)+"\n📅 عضویت: "+joined);
-    });
-    if(members.length>50) lines.push("… و "+toFa(members.length-50)+" عضو دیگر");
-    return sendPlain(chat, lines.join("\n\n"), mainKb);
+  /**
+   * دریافت اعتبار فعلی یک کاربر
+   * @param {string} userId - شناسه‌ی یکتای کاربر (مثلاً chatId)
+   * @returns {Promise<number>} - مقدار اعتبار (در صورت نبودن کاربر، ۰ برگردانده می‌شود)
+   */
+  async getCredits(userId) {
+    const result = this.ctx.storage.sql.exec(
+      `SELECT amount FROM credits WHERE user_id = ?`,
+      userId
+    ).one();
+    return result ? result.amount : 0;
   }
 
-  // ── حالت انتظار
-  const awaitingRaw = await env.KV.get("await:"+chat);
-  if(awaitingRaw){
-    let awaiting; try{ awaiting=JSON.parse(awaitingRaw);}catch(e){ awaiting={mode:"broadcast"}; }
-    await env.KV.delete("await:"+chat);
-    if(awaiting.mode==="send"){
-      const res = await sendToMany(env, awaiting.ids, text);
-      return sendMessage(chat,"📨 ارسال شد.\n✅ موفق: "+toFa(res.sent)+"\n⚠️ ناموفق: "+toFa(res.failed));
-    } else {
-      const res = await broadcast(env, text);
-      return sendMessage(chat,"📣 پخش شد.\n✅ موفق: "+toFa(res.sent)+"\n⚠️ ناموفق: "+toFa(res.failed));
-    }
+  /**
+   * افزودن اعتبار به کاربر (اتمیک)
+   * @param {string} userId
+   * @param {number} amount - مقدار اعتبار برای افزودن (می‌تواند منفی باشد)
+   */
+  async addCredits(userId, amount) {
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO credits (user_id, amount, last_updated) VALUES (?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         amount = amount + excluded.amount,
+         last_updated = excluded.last_updated`,
+      userId, amount, now
+    );
   }
 
-  // ── منوی عادی
-  if(text==="🔮 استخاره") return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
-  if(text==="👤 حساب من"){
-    const {u} = await getUser(env, chat);
-    return sendMessage(chat,
-      "👤 <b>حساب من</b>\n\n💎 اعتبار: "+toFa(u.credits)+
-      "\n🔮 استخاره‌ها: "+toFa(u.draws)+
-      "\n🔓 باز شده: "+toFa(u.unlocks), mainKb);
-  }
-  if(text==="🛍 فروشگاه") return sendMessage(chat, STORE_MSG, storeKb);
-  return sendMessage(chat,"برای شروع، «🔮 استخاره» را بزن.",mainKb);
-}
-
-// ── پرداخت
-async function onPreCheckout(pcq){
-  const pack = PACKS.find(p=>p.id===pcq.invoice_payload);
-  if(!pack) return answerPreCheckout(pcq.id, false, "بستهٔ نامعتبر است.");
-  return answerPreCheckout(pcq.id, true);
-}
-async function onSuccessfulPayment(m, env){
-  const chat=m.chat.id, sp=m.successful_payment;
-  const pack = PACKS.find(p=>p.id===sp.invoice_payload);
-  if(!pack) return;
-  const txId = sp.telegram_payment_charge_id;
-  try { const done = await env.KV.get("tx:"+txId); if(done) return; } catch(e){}
-  const {u} = await getUser(env, chat);
-  u.credits += pack.credits + pack.bonus;
-  await saveUser(env, chat, u);
-  try { await env.KV.put("tx:"+txId, JSON.stringify({pack:pack.id, chat, at:Date.now()})); } catch(e){}
-  return sendMessage(chat,
-    "🎉 پرداخت موفق!\n\n💎 "+toFa(pack.credits+pack.bonus)+" اعتبار به حساب تو اضافه شد.\nاعتبار فعلی: "+toFa(u.credits), mainKb);
-}
-
-// ── callback
-async function onCallback(cq, env, allowedUsers){
-  const chat=cq.message.chat.id, data=cq.data||"";
-  await answerCallback(cq.id);
-  if(!isAllowed(chat, allowedUsers)) return sendMessage(chat, PRIVATE_MSG, mainKb);
-  const {u, exists} = await getUser(env, chat);
-
-  if(data==="home")  return sendMessage(chat,"🏠 منوی اصلی",mainKb);
-  if(data==="new")   return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
-  if(data==="cats")  return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
-  if(data==="store") return sendMessage(chat, STORE_MSG, storeKb);
-
-  if(data.startsWith("cat:")){
-    const cat = CATEGORIES.find(c=>c.id===data.slice(4));
-    if(!cat) return sendMessage(chat,"📂 دستهٔ موردنظرت رو انتخاب کن:",catKb());
-    return sendMessage(chat,"📂 دستهٔ «"+cat.full+"» — موضوعت رو انتخاب کن:",topicKb(cat.id));
+  /**
+   * کم کردن اعتبار (اتمیک و امن در برابر همزمانی)
+   * @param {string} userId
+   * @returns {Promise<boolean>} - true اگر اعتبار کافی بود و کم شد، false در غیر این صورت
+   */
+  async deductCredit(userId) {
+    const result = this.ctx.storage.sql.exec(
+      `UPDATE credits SET amount = amount - 1, last_updated = ?
+       WHERE user_id = ? AND amount > 0`,
+      new Date().toISOString(), userId
+    );
+    // rowsWritten نشان می‌دهد که آیا رکوردی به‌روزرسانی شده است یا خیر
+    return result.rowsWritten > 0;
   }
 
-  if(data.startsWith("buy:")){
-    const pack = PACKS.find(p=>p.id===data.slice(4));
-    if(!pack) return sendMessage(chat,"⚠️ بسته پیدا نشد.",mainKb);
-    return sendInvoice(chat, pack);
-  }
-
-  if(data.startsWith("topic:")){
-    const t = data.slice(6);
-    if(exists && u.topic !== t){ u.topic = t; await saveUser(env,chat,u); }
-    return sendMessage(chat, RITUAL, ritualKb(t));
-  }
-
-  if(data.startsWith("draw:")){
-    const t = data.slice(5);
-    u.topic = t; u.last = pickIndex(); u.draws += 1;
-    await saveUser(env,chat,u);
-    await sendMessage(chat,"🔮 در حال انجام استخاره...");
-    return sendMessage(chat, freeMsg(CONTENT[u.last], t), resultKb(t));
-  }
-
-  if(data.startsWith("unlock:") || data.startsWith("view:")){
-    const t = data.slice(data.indexOf(":")+1);
-    const rec = CONTENT[u.last];
-    if(!rec) return sendMessage(chat,"⚠️ خطای کوچک؛ لطفاً یک استخارهٔ جدید بگیر.",mainKb);
-    const key = u.last+":"+t;
-    if(u.unlocked.includes(key)) return sendMessage(chat, premiumMsg(rec, t), unlockedKb(t));
-    if(u.credits>0){
-      u.credits -= 1; u.unlocks += 1; u.unlocked.push(key);
-      await saveUser(env,chat,u);
-      return sendMessage(chat, premiumMsg(rec, t), unlockedKb(t));
-    }
-    return sendMessage(chat, NO_CREDIT_MSG, noCreditKb);
+  /**
+   * بررسی و کم کردن اعتبار در یک عملیات اتمیک (برای مواقعی که می‌خواهید
+   * قبل از انجام کار، از کافی بودن اعتبار مطمئن شوید)
+   */
+  async checkAndDeduct(userId) {
+    const current = await this.getCredits(userId);
+    if (current < 1) return false;
+    return await this.deductCredit(userId);
   }
 }
 
+// ========== 4. HELPER FUNCTIONS ==========
+
+/**
+ * ارسال درخواست به API بله
+ */
+async function callBaleAPI(method, body) {
+  const url = `${API_BASE}/bot${BOT_TOKEN}/${method}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return response.json();
+}
+
+/**
+ * دریافت یک Durable Object Stub برای یک کاربر خاص
+ * هر کاربر همیشه به همان Durable Object اختصاصی خودش متصل می‌شود.
+ */
+function getCreditManagerStub(env, userId) {
+  const id = env.CREDIT_MANAGER.idFromName(String(userId));
+  return env.CREDIT_MANAGER.get(id);
+}
+
+/**
+ * بررسی اینکه آیا کاربر مجاز است (بر اساس لیست سفید)
+ */
+function isUserAllowed(userId) {
+  if (ALLOWED_USERS.length === 0) return true; // عمومی
+  return ALLOWED_USERS.includes(userId);
+}
+
+/**
+ * انتخاب تصادفی امن یک رکورد محتوا
+ */
+function pickRandomContent() {
+  const array = new Uint32Array(1);
+  crypto.getRandomValues(array);
+  const index = array[0] % CONTENT.length;
+  return CONTENT[index];
+}
+
+/**
+ * ساخت پیام رایگان بر اساس رکورد محتوا
+ */
+function freeMsg(record, topic) {
+  const t = record.topics[topic] || {};
+  return `
+📊 نتیجه: ${record.level} ${record.badge}
+📝 ${record.free_summary}
+📖 ${record.arabic}
+🌐 ${record.translation}
+📍 سوره ${record.surah} | آیه ${record.ayah}
+${record.cta_free || ""}
+  `.trim();
+}
+
+/**
+ * ساخت پیام پریمیوم بر اساس رکورد محتوا و موضوع
+ */
+function premiumMsg(record, topic) {
+  const t = record.topics[topic] || {};
+  return `
+💎 ${record.core_message}
+💡 نکته: ${t.tip || "—"}
+⚠️ هشدار: ${t.warning || "—"}
+🛠 راهکار: ${t.action || "—"}
+🌟 ${record.final_summary}
+${record.cta_dua || ""}
+⚖️ سلب مسئولیت: استخاره جایگزین عقل، تحقیق و مشورت نیست.
+  `.trim();
+}
+
+// ========== 5. MAIN WORKER ==========
 export default {
-  async fetch(request, env){
-    TOKEN = env.BOT_TOKEN || "";
-    WALLET_TOKEN = env.WALLET_TOKEN || "WALLET-TEST-1111111111111111";
-    const allowedStr = env.ALLOWED_USERS || "";
-    const allowedUsers = allowedStr
-      ? allowedStr.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n))
-      : [];
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
 
-    if(request.method==="GET"){
-      const url=new URL(request.url);
-      if(url.pathname==="/test"){
-        const out={ version:16, schema:5, hasToken:!!env.BOT_TOKEN, hasKV:!!env.KV, records:CONTENT.length,
-          wallet: WALLET_TOKEN.startsWith("WALLET-TEST")?"test":"real",
-          privateMode: allowedUsers.length>0 ? allowedUsers.length+" users allowed" : "public (all users)" };
-        return new Response(JSON.stringify(out,null,2),{headers:{"Content-Type":"application/json"}});
+    // Endpoint سلامت
+    if (request.method === "GET" && url.pathname === "/test") {
+      return new Response(JSON.stringify({
+        status: "ok",
+        version: "v16-with-DO",
+        schema: "v5",
+        contentCount: CONTENT.length,
+        doConfigured: !!env.CREDIT_MANAGER,
+        kvConfigured: !!env.USERS_KV,
+        publicMode: ALLOWED_USERS.length === 0,
+      }), { headers: { "Content-Type": "application/json" } });
+    }
+
+    // فقط درخواست‌های POST (webhook بله) را پردازش کن
+    if (request.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    let update;
+    try {
+      update = await request.json();
+    } catch {
+      return new Response("Bad Request", { status: 400 });
+    }
+
+    // پردازش پیام یا callback
+    const message = update.message || update.callback_query?.message;
+    const callbackQuery = update.callback_query;
+    const chatId = message?.chat?.id;
+    const userId = chatId ? String(chatId) : null;
+
+    // اگر کاربر ناشناس بود، خارج شو
+    if (!userId) {
+      return new Response("OK", { status: 200 });
+    }
+
+    // بررسی لیست سفید
+    if (!isUserAllowed(chatId)) {
+      await callBaleAPI("sendMessage", {
+        chat_id: chatId,
+        text: "⛔ شما به این بات دسترسی ندارید.",
+      });
+      return new Response("OK", { status: 200 });
+    }
+
+    // دریافت Stub مدیریت اعتبار برای این کاربر
+    const creditStub = getCreditManagerStub(env, userId);
+
+    // ========== پردازش callback queries ==========
+    if (callbackQuery) {
+      const data = callbackQuery.data;
+      const callbackId = callbackQuery.id;
+
+      // پاسخ به callback (برای جلوگیری از انتظار)
+      await callBaleAPI("answerCallbackQuery", { callback_query_id: callbackId });
+
+      // callback: شروع استخاره جدید
+      if (data === "new_estekhare") {
+        await callBaleAPI("sendMessage", {
+          chat_id: chatId,
+          text: "موضوع خود را انتخاب کنید:",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "👪 خانواده", callback_data: "cat_family" }],
+              [{ text: "💼 کسب‌وکار", callback_data: "cat_business" }],
+            ],
+          },
+        });
       }
-      return new Response("ok");
+
+      // callback: انتخاب موضوع (مثال)
+      if (data.startsWith("topic_")) {
+        const topic = data.replace("topic_", "");
+
+        // انتخاب رکورد تصادفی
+        const record = pickRandomContent();
+
+        // ارسال پیام رایگان
+        await callBaleAPI("sendMessage", {
+          chat_id: chatId,
+          text: freeMsg(record, topic),
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: `💎 استخاره تخصصی`, callback_data: `premium_${topic}_${record.page}` }],
+            ],
+          },
+        });
+      }
+
+      // callback: استخاره تخصصی
+      if (data.startsWith("premium_")) {
+        const parts = data.split("_");
+        const topic = parts[1];
+        const page = parseInt(parts[2]);
+
+        // پیدا کردن رکورد مربوطه
+        const record = CONTENT.find((r) => r.page === page);
+        if (!record) {
+          await callBaleAPI("sendMessage", {
+            chat_id: chatId,
+            text: "⚠️ محتوای مورد نظر یافت نشد.",
+          });
+          return new Response("OK", { status: 200 });
+        }
+
+        // 🔥 بخش حیاتی: کم کردن اعتبار به‌صورت اتمیک از طریق Durable Object
+        const success = await creditStub.deductCredit(userId);
+
+        if (!success) {
+          // اعتبار کافی نیست
+          const current = await creditStub.getCredits(userId);
+          await callBaleAPI("sendMessage", {
+            chat_id: chatId,
+            text: `⚠️ اعتبار شما کافی نیست. اعتبار فعلی: ${current}\n\nبرای خرید اعتبار، از منوی فروشگاه استفاده کنید.`,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "🛍 فروشگاه اعتبار", callback_data: "shop" }],
+              ],
+            },
+          });
+          return new Response("OK", { status: 200 });
+        }
+
+        // اعتبار کم شد → ارسال محتوای پریمیوم
+        await callBaleAPI("sendMessage", {
+          chat_id: chatId,
+          text: premiumMsg(record, topic),
+        });
+      }
+
+      return new Response("OK", { status: 200 });
     }
-    if(request.method==="POST"){
-      try{
-        const u = await request.json();
-        if(u.pre_checkout_query) await onPreCheckout(u.pre_checkout_query);
-        else if(u.message && u.message.successful_payment) await onSuccessfulPayment(u.message, env);
-        else if(u.message) await onMessage(u.message, env, allowedUsers);
-        else if(u.callback_query) await onCallback(u.callback_query, env, allowedUsers);
-      }catch(e){ console.error(e); }
+
+    // ========== پردازش پیام‌های متنی ==========
+    if (message && message.text) {
+      const text = message.text;
+
+      // دستور /start
+      if (text === "/start") {
+        // بررسی هدیه ۲ اعتبار برای کاربر جدید
+        const currentCredits = await creditStub.getCredits(userId);
+        if (currentCredits === 0) {
+          await creditStub.addCredits(userId, 2); // هدیه ۲ اعتبار
+        }
+
+        await callBaleAPI("sendMessage", {
+          chat_id: chatId,
+          text: `🌿 سلام! به بات نشانِ دل خوش آمدید.\n\nاعتبار شما: ${await creditStub.getCredits(userId)}`,
+          reply_markup: {
+            keyboard: [
+              [{ text: "🔮 استخاره" }],
+              [{ text: "👤 حساب من" }, { text: "🛍 فروشگاه" }],
+            ],
+            resize_keyboard: true,
+          },
+        });
+      }
+
+      // دستور /credits
+      if (text === "/credits") {
+        const credits = await creditStub.getCredits(userId);
+        await callBaleAPI("sendMessage", {
+          chat_id: chatId,
+          text: `💎 اعتبار شما: ${credits}`,
+        });
+      }
+
+      // مدیریت پرداخت موفق (SuccessfulPayment)
+      // این بخش باید در webhook پردازش شود؛ در اینجا فقط نمونه است
     }
-    return new Response("ok");
-  }
+
+    // پردازش pre_checkout_query (برای تأیید پرداخت)
+    if (update.pre_checkout_query) {
+      await callBaleAPI("answerPreCheckoutQuery", {
+        pre_checkout_query_id: update.pre_checkout_query.id,
+        ok: true,
+      });
+      return new Response("OK", { status: 200 });
+    }
+
+    // پردازش successful_payment
+    if (update.message?.successful_payment) {
+      const payment = update.message.successful_payment;
+      const chargeId = payment.telegram_payment_charge_id;
+
+      // 🔥 جلوگیری از پردازش تکراری
+      const txKey = `tx:${chargeId}`;
+      const alreadyProcessed = await env.USERS_KV.get(txKey);
+      if (alreadyProcessed) {
+        return new Response("OK", { status: 200 });
+      }
+
+      // افزودن اعتبار بر اساس بسته‌ی خریداری شده
+      const packages = {
+        "10": 10,
+        "35": 35,
+        "120": 120,
+      };
+      const amount = packages[payment.invoice_payload] || 0;
+
+      if (amount > 0) {
+        await creditStub.addCredits(userId, amount);
+
+        // علامت‌گذاری تراکنش به‌عنوان پردازش‌شده
+        await env.USERS_KV.put(txKey, "done", { expirationTtl: 86400 * 30 });
+
+        await callBaleAPI("sendMessage", {
+          chat_id: chatId,
+          text: `✅ پرداخت موفق! ${amount} اعتبار به حساب شما اضافه شد.`,
+        });
+      }
+
+      return new Response("OK", { status: 200 });
+    }
+
+    return new Response("OK", { status: 200 });
+  },
 };
