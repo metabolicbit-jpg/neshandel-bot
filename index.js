@@ -6,6 +6,7 @@ import { CONTENT } from "./content/index.js";
 const API_BASE = "https://tapi.bale.ai";
 const DRAW_COOLDOWN_MS = 5000;
 const DO_VERSION_PREFIX = "v2:";
+const BACKUP_RETENTION_DAYS = 30;
 
 const CATEGORIES = [
   { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
@@ -85,13 +86,9 @@ export class CreditManager extends DurableObject {
           last_updated TEXT NOT NULL
         );
       `);
-    } catch (e) {
-      console.error("DO create table error:", e);
-    }
+    } catch (e) { console.error("DO create table error:", e); }
 
-    const tryAlter = (sql) => {
-      try { this.ctx.storage.sql.exec(sql); } catch (e) { /* ستون وجود دارد */ }
-    };
+    const tryAlter = (sql) => { try { this.ctx.storage.sql.exec(sql); } catch (e) {} };
     tryAlter(`ALTER TABLE credits ADD COLUMN total_estekhare INTEGER NOT NULL DEFAULT 0`);
     tryAlter(`ALTER TABLE credits ADD COLUMN total_opens INTEGER NOT NULL DEFAULT 0`);
     tryAlter(`ALTER TABLE credits ADD COLUMN last_topic TEXT`);
@@ -103,33 +100,20 @@ export class CreditManager extends DurableObject {
   }
 
   async getStats(userId) {
-    const r = this.ctx.storage.sql.exec(
-      `SELECT * FROM credits WHERE user_id = ?`, userId
-    ).one();
+    const r = this.ctx.storage.sql.exec(`SELECT * FROM credits WHERE user_id = ?`, userId).one();
     if (r) return r;
     return { user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0, last_topic: null, last_page: null, last_draw_time: 0, unlocked: "[]", name: "", joined: 0 };
   }
 
-  // ✅ نسخهٔ اصلاح‌شده — بدون CASE WHEN (که در DO SQLite پشتیبانی نمی‌شه)
   async ensureUser(userId, name) {
     const now = new Date().toISOString();
     const trimmedName = (name || "").trim();
-
-    const existing = this.ctx.storage.sql.exec(
-      `SELECT user_id FROM credits WHERE user_id = ?`, userId
-    ).one();
-
+    const existing = this.ctx.storage.sql.exec(`SELECT user_id FROM credits WHERE user_id = ?`, userId).one();
     if (existing) {
       if (trimmedName) {
-        this.ctx.storage.sql.exec(
-          `UPDATE credits SET name = ?, last_updated = ? WHERE user_id = ?`,
-          trimmedName, now, userId
-        );
+        this.ctx.storage.sql.exec(`UPDATE credits SET name = ?, last_updated = ? WHERE user_id = ?`, trimmedName, now, userId);
       } else {
-        this.ctx.storage.sql.exec(
-          `UPDATE credits SET last_updated = ? WHERE user_id = ?`,
-          now, userId
-        );
+        this.ctx.storage.sql.exec(`UPDATE credits SET last_updated = ? WHERE user_id = ?`, now, userId);
       }
     } else {
       this.ctx.storage.sql.exec(
@@ -140,9 +124,7 @@ export class CreditManager extends DurableObject {
   }
 
   async getCredits(userId) {
-    const r = this.ctx.storage.sql.exec(
-      `SELECT amount FROM credits WHERE user_id = ?`, userId
-    ).one();
+    const r = this.ctx.storage.sql.exec(`SELECT amount FROM credits WHERE user_id = ?`, userId).one();
     return r ? r.amount : 0;
   }
 
@@ -150,9 +132,7 @@ export class CreditManager extends DurableObject {
     const now = new Date().toISOString();
     this.ctx.storage.sql.exec(
       `INSERT INTO credits (user_id, amount, last_updated) VALUES (?, ?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET
-         amount = amount + excluded.amount,
-         last_updated = excluded.last_updated`,
+       ON CONFLICT(user_id) DO UPDATE SET amount = amount + excluded.amount, last_updated = excluded.last_updated`,
       userId, amount, now
     );
   }
@@ -168,15 +148,10 @@ export class CreditManager extends DurableObject {
 
   async canDraw(userId) {
     try {
-      const r = this.ctx.storage.sql.exec(
-        `SELECT last_draw_time FROM credits WHERE user_id = ?`, userId
-      ).one();
+      const r = this.ctx.storage.sql.exec(`SELECT last_draw_time FROM credits WHERE user_id = ?`, userId).one();
       if (!r || !r.last_draw_time) return true;
       return (Date.now() - r.last_draw_time) >= DRAW_COOLDOWN_MS;
-    } catch (e) {
-      console.error("canDraw error:", e);
-      return true;
-    }
+    } catch (e) { console.error("canDraw error:", e); return true; }
   }
 
   async recordEstekhare(userId, topic, page) {
@@ -195,30 +170,58 @@ export class CreditManager extends DurableObject {
   }
 
   async isUnlocked(userId, page, topic) {
-    const r = this.ctx.storage.sql.exec(
-      `SELECT unlocked FROM credits WHERE user_id = ?`, userId
-    ).one();
+    const r = this.ctx.storage.sql.exec(`SELECT unlocked FROM credits WHERE user_id = ?`, userId).one();
     if (!r || !r.unlocked) return false;
-    try {
-      const arr = JSON.parse(r.unlocked);
-      return arr.includes(page + ":" + topic);
-    } catch { return false; }
+    try { return JSON.parse(r.unlocked).includes(page + ":" + topic); } catch { return false; }
   }
 
   async markUnlocked(userId, page, topic) {
-    const r = this.ctx.storage.sql.exec(
-      `SELECT unlocked FROM credits WHERE user_id = ?`, userId
-    ).one();
+    const r = this.ctx.storage.sql.exec(`SELECT unlocked FROM credits WHERE user_id = ?`, userId).one();
     let arr = [];
-    if (r && r.unlocked) {
-      try { arr = JSON.parse(r.unlocked); } catch (e) { /* ignore */ }
-    }
+    if (r && r.unlocked) { try { arr = JSON.parse(r.unlocked); } catch {} }
     const key = page + ":" + topic;
     if (!arr.includes(key)) arr.push(key);
     this.ctx.storage.sql.exec(
       `UPDATE credits SET unlocked = ?, last_updated = ? WHERE user_id = ?`,
       JSON.stringify(arr), new Date().toISOString(), userId
     );
+  }
+
+  // 🆕 برای بکاپ: خروجی کامل داده‌های این کاربر
+  async exportData() {
+    return this.ctx.storage.sql.exec(`SELECT * FROM credits`).toArray();
+  }
+
+  // 🆕 برای بازگردانی
+  async restoreData(rows) {
+    for (const row of rows) {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, last_updated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+           amount = excluded.amount,
+           total_estekhare = excluded.total_estekhare,
+           total_opens = excluded.total_opens,
+           last_topic = excluded.last_topic,
+           last_page = excluded.last_page,
+           last_draw_time = excluded.last_draw_time,
+           unlocked = excluded.unlocked,
+           name = excluded.name,
+           joined = excluded.joined,
+           last_updated = excluded.last_updated`,
+        row.user_id,
+        row.amount || 0,
+        row.total_estekhare || 0,
+        row.total_opens || 0,
+        row.last_topic || null,
+        row.last_page || null,
+        row.last_draw_time || 0,
+        row.unlocked || "[]",
+        row.name || "",
+        row.joined || 0,
+        new Date().toISOString()
+      );
+    }
   }
 }
 
@@ -237,8 +240,7 @@ async function baleCall(env, method, payload) {
 
 const sendMessage = (env, chat_id, text, reply_markup) =>
   baleCall(env, "sendMessage", { chat_id, text, parse_mode: "HTML", reply_markup });
-const answerCallback = (env, id) =>
-  baleCall(env, "answerCallbackQuery", { callback_query_id: id });
+const answerCallback = (env, id) => baleCall(env, "answerCallbackQuery", { callback_query_id: id });
 const sendInvoice = (env, chat_id, pack) =>
   baleCall(env, "sendInvoice", {
     chat_id, title: pack.title, description: pack.desc, payload: pack.id,
@@ -263,6 +265,12 @@ function isUserAdmin(env, chatId) {
   const list = (env.ADMIN_USERS || "").trim();
   if (!list) return false;
   return list.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)).includes(chatId);
+}
+
+function checkAdminSecret(env, url) {
+  const provided = url.searchParams.get("auth") || "";
+  const secret = (env.ADMIN_SECRET || "").trim();
+  return secret && provided === secret;
 }
 
 function pickIndex() {
@@ -295,8 +303,7 @@ function topicBlockV5(r, t) {
 
 // ========== 5. ADMIN HELPERS ==========
 async function broadcast(env, text) {
-  let cursor;
-  let sent = 0, failed = 0;
+  let cursor; let sent = 0, failed = 0;
   for (;;) {
     const page = await env.USERS_KV.list({ prefix: "user:", cursor });
     for (const k of page.keys) {
@@ -329,16 +336,87 @@ async function listMembers(env) {
       const id = parseInt(k.name.slice(5), 10);
       if (isNaN(id)) continue;
       let u = {};
-      try {
-        const raw = await env.USERS_KV.get(k.name);
-        if (raw) u = JSON.parse(raw);
-      } catch (e) { /* ignore */ }
+      try { const raw = await env.USERS_KV.get(k.name); if (raw) u = JSON.parse(raw); } catch {}
       members.push({ id, name: u.name || "", joined: u.joined || 0 });
     }
     if (page.list_complete) break;
     cursor = page.cursor;
   }
   return members;
+}
+
+// ========== 5.b BACKUP HELPERS (KV-based) ==========
+async function listAllUserIds(env) {
+  const ids = [];
+  let cursor;
+  for (;;) {
+    const page = await env.USERS_KV.list({ prefix: "user:", cursor });
+    for (const k of page.keys) {
+      const id = parseInt(k.name.slice(5), 10);
+      if (!isNaN(id)) ids.push(id);
+    }
+    if (page.list_complete) break;
+    cursor = page.cursor;
+  }
+  return ids;
+}
+
+async function performBackup(env) {
+  const startedAt = Date.now();
+  const userIds = await listAllUserIds(env);
+  console.log("[Backup] Found " + userIds.length + " users in KV");
+
+  const allData = {};
+  const chunkSize = 20;
+  for (let i = 0; i < userIds.length; i += chunkSize) {
+    const chunk = userIds.slice(i, i + chunkSize);
+    const results = await Promise.all(chunk.map(async (uid) => {
+      try {
+        const stub = getStub(env, uid);
+        const rows = await stub.exportData();
+        return { uid, rows };
+      } catch (e) {
+        console.error("[Backup] Export error for " + uid + ":", e);
+        return { uid, rows: [] };
+      }
+    }));
+    for (const r of results) {
+      if (r.rows && r.rows.length) allData[r.uid] = r.rows;
+    }
+  }
+
+  const backup = {
+    timestamp: startedAt,
+    date: new Date(startedAt).toISOString(),
+    userCount: Object.keys(allData).length,
+    users: allData,
+  };
+
+  const dateKey = new Date(startedAt).toISOString().split("T")[0];
+  const kvKey = "backup:" + dateKey;
+
+  // ذخیره در KV با TTL = retention + 5 روز (برای اطمینان)
+  const ttl = (BACKUP_RETENTION_DAYS + 5) * 24 * 60 * 60;
+  await env.USERS_KV.put(kvKey, JSON.stringify(backup), { expirationTtl: ttl });
+
+  const duration = Date.now() - startedAt;
+  console.log("[Backup] Done: " + kvKey + ", users: " + backup.userCount + ", took " + duration + "ms");
+  return { success: true, key: kvKey, userCount: backup.userCount, duration };
+}
+
+async function listBackups(env) {
+  const backups = [];
+  let cursor;
+  for (;;) {
+    const page = await env.USERS_KV.list({ prefix: "backup:", cursor });
+    for (const k of page.keys) {
+      backups.push({ key: k.name, expiration: k.expiration });
+    }
+    if (page.list_complete) break;
+    cursor = page.cursor;
+  }
+  backups.sort((a, b) => b.key.localeCompare(a.key));
+  return backups;
 }
 
 // ========== 6. KEYBOARDS ==========
@@ -361,19 +439,12 @@ function topicKb(catId) {
   const cat = CATEGORIES.find(c => c.id === catId);
   if (!cat) return catKb();
   const visible = cat.topics.filter(t => !t.hidden && (t.phase || 1) <= CURRENT_PHASE);
-  const rows = [];
-  let pair = null;
+  const rows = []; let pair = null;
   for (const t of visible) {
     const btn = { text: t.label, callback_data: "topic:" + t.id };
-    if (t.label.length > 12) {
-      if (pair) { rows.push([pair]); pair = null; }
-      rows.push([btn]);
-    } else if (pair) {
-      rows.push([pair, btn]);
-      pair = null;
-    } else {
-      pair = btn;
-    }
+    if (t.label.length > 12) { if (pair) { rows.push([pair]); pair = null; } rows.push([btn]); }
+    else if (pair) { rows.push([pair, btn]); pair = null; }
+    else pair = btn;
   }
   if (pair) rows.push([pair]);
   rows.push([{ text: "↩️ بازگشت", callback_data: "cats" }]);
@@ -386,12 +457,9 @@ function freeMsg(r, t) {
     return [
       (r.intro || "سلام رفیق عزیزم! 🌿"), "",
       "📊 جواب استخاره: " + r.level + " " + r.badge, "",
-      "📝 پاسخ کلی به نیت شما:",
-      r.free_summary, "",
+      "📝 پاسخ کلی به نیت شما:", r.free_summary, "",
       "📖 آیه اول سرصفحه (صفحه " + toFa(r.page) + " – سوره " + r.surah + "، آیه " + toFa(r.ayah) + "):",
-      r.arabic, "",
-      "🌐 ترجمه روان:",
-      "«" + r.translation + "»", "",
+      r.arabic, "", "🌐 ترجمه روان:", "«" + r.translation + "»", "",
       "📍 سوره " + r.surah + " | آیه " + toFa(r.ayah), "",
       (r.cta_free || r.cta || ""),
     ].join("\n");
@@ -401,11 +469,8 @@ function freeMsg(r, t) {
     r.badge + " <b>نتیجه:</b> " + r.verdict,
     "<b>" + (r.headline || "") + "</b>", "",
     "📖 سوره " + r.surah + " — آیهٔ " + toFa(r.ayah) + " (صفحهٔ " + toFa(r.page) + ")",
-    r.arabic, "",
-    "📜 " + r.translation, "",
-    (r.opener || ""),
-    (r.plain || ""), "",
-    (r.cta_free || ""),
+    r.arabic, "", "📜 " + r.translation, "",
+    (r.opener || ""), (r.plain || ""), "", (r.cta_free || ""),
   ].join("\n");
 }
 
@@ -415,18 +480,12 @@ function premiumMsg(r, t) {
   return [
     "💎 استخاره تخصصی | " + L,
     "نتیجه: " + B.verdict + " " + B.badge, "",
-    "💎 پیام محوری و منطوق آیه:",
-    r.core_message || "", "",
-    "💡 نکته و رمز آیه:",
-    B.tip || "", "",
-    "⚠️ زنگ خطر / هشدار:",
-    B.warning || "", "",
-    "🛠 راهکار عملیاتی:",
-    renderAction(B.action), "",
-    "🌟 جمع‌بندی نهایی استخاره صفحه " + toFa(r.page) + ":",
-    (r.final_summary || ""), "",
-    (r.cta_dua || ""), "",
-    DISCLAIMER,
+    "💎 پیام محوری و منطوق آیه:", r.core_message || "", "",
+    "💡 نکته و رمز آیه:", B.tip || "", "",
+    "⚠️ زنگ خطر / هشدار:", B.warning || "", "",
+    "🛠 راهکار عملیاتی:", renderAction(B.action), "",
+    "🌟 جمع‌بندی نهایی استخاره صفحه " + toFa(r.page) + ":", (r.final_summary || ""), "",
+    (r.cta_dua || ""), "", DISCLAIMER,
   ].join("\n");
 }
 
@@ -434,19 +493,15 @@ function premiumMsg(r, t) {
 async function onMessage(env, m, allowedUsers) {
   const chat = m.chat.id;
   const text = (m.text || "").trim();
-
   if (!isUserAllowed(env, chat)) return sendMessage(env, chat, "🔒 این بات در حال تست خصوصی است.", mainKb);
-
   const stub = getStub(env, chat);
   const isAdmin = isUserAdmin(env, chat);
 
-  // ===== حالت انتظار ادمین =====
   const awaitingRaw = await env.USERS_KV.get("await:" + chat);
   if (awaitingRaw && isAdmin) {
     let awaiting;
     try { awaiting = JSON.parse(awaitingRaw); } catch { awaiting = { mode: "broadcast" }; }
     await env.USERS_KV.delete("await:" + chat);
-
     if (awaiting.mode === "send") {
       const res = await sendToMany(env, awaiting.ids, text);
       return sendMessage(env, chat, "📨 ارسال شد.\n✅ موفق: " + toFa(res.sent) + "\n⚠️ ناموفق: " + toFa(res.failed), mainKb);
@@ -456,28 +511,18 @@ async function onMessage(env, m, allowedUsers) {
     }
   }
 
-  // ===== /start =====
   if (text === "/start") {
     try {
       const cleanName = ((m.chat.first_name || "") + " " + (m.chat.last_name || "")).trim();
       const stats = await stub.getStats(chat);
       const isNew = !stats.joined;
-
       await stub.ensureUser(chat, cleanName);
       if (isNew) await stub.addCredits(chat, 2);
-
-      try {
-        await env.USERS_KV.put("user:" + chat, JSON.stringify({ name: cleanName, joined: Date.now() }));
-      } catch (e) { console.error("KV put error:", e); }
-
+      try { await env.USERS_KV.put("user:" + chat, JSON.stringify({ name: cleanName, joined: Date.now() })); } catch (e) {}
       return sendMessage(env, chat, WELCOME, mainKb);
-    } catch (e) {
-      console.error("/start error:", e);
-      return sendMessage(env, chat, START_ERROR_MSG, mainKb);
-    }
+    } catch (e) { console.error("/start error:", e); return sendMessage(env, chat, START_ERROR_MSG, mainKb); }
   }
 
-  // ===== دستورات ادمین =====
   if (text === "/cancel") {
     if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
     await env.USERS_KV.delete("await:" + chat);
@@ -510,13 +555,41 @@ async function onMessage(env, m, allowedUsers) {
       });
       if (members.length > 50) lines.push("… و " + toFa(members.length - 50) + " عضو دیگر");
       return sendMessage(env, chat, lines.join("\n\n"), mainKb);
+    } catch (e) { console.error("/members error:", e); return sendMessage(env, chat, "⚠️ خطا در دریافت لیست اعضا.", mainKb); }
+  }
+
+  if (text === "/backup") {
+    if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
+    await sendMessage(env, chat, "🔄 در حال اجرای بکاپ...", mainKb);
+    try {
+      const res = await performBackup(env);
+      return sendMessage(env, chat,
+        "✅ بکاپ انجام شد.\n\n" +
+        "📁 کلید: <code>" + res.key + "</code>\n" +
+        "👥 تعداد کاربران: " + toFa(res.userCount) + "\n" +
+        "⏱ زمان: " + toFa(res.duration) + "ms", mainKb);
     } catch (e) {
-      console.error("/members error:", e);
-      return sendMessage(env, chat, "⚠️ خطا در دریافت لیست اعضا.", mainKb);
+      console.error("backup error:", e);
+      return sendMessage(env, chat, "⚠️ خطا در بکاپ: " + e.message, mainKb);
     }
   }
 
-  // ===== منوی عادی =====
+  if (text === "/backups") {
+    if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
+    try {
+      const list = await listBackups(env);
+      if (!list.length) return sendMessage(env, chat, "📭 هنوز بکاپی ثبت نشده.", mainKb);
+      let lines = ["📦 بکاپ‌های موجود: " + toFa(list.length), ""];
+      list.slice(0, 15).forEach((b, i) => {
+        lines.push(toFa(i + 1) + ". <code>" + b.key + "</code>");
+      });
+      return sendMessage(env, chat, lines.join("\n"), mainKb);
+    } catch (e) {
+      console.error("/backups error:", e);
+      return sendMessage(env, chat, "⚠️ خطا در لیست بکاپ‌ها.", mainKb);
+    }
+  }
+
   if (text === "🔮 استخاره" || text === "/estekhare")
     return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
 
@@ -527,10 +600,7 @@ async function onMessage(env, m, allowedUsers) {
         "👤 <b>حساب من</b>\n\n💎 اعتبار: " + toFa(s.amount) +
         "\n🔮 استخاره‌ها: " + toFa(s.total_estekhare) +
         "\n🔓 باز شده: " + toFa(s.total_opens), mainKb);
-    } catch (e) {
-      console.error("account error:", e);
-      return sendMessage(env, chat, "⚠️ خطا در خواندن حساب. لطفاً دوباره تلاش کن.", mainKb);
-    }
+    } catch (e) { console.error("account error:", e); return sendMessage(env, chat, "⚠️ خطا در خواندن حساب.", mainKb); }
   }
 
   if (text === "🛍 فروشگاه" || text === "/shop")
@@ -543,18 +613,13 @@ async function onCallback(env, cq, allowedUsers) {
   const chat = cq.message.chat.id;
   const data = cq.data || "";
   await answerCallback(env, cq.id);
-
-  if (!isUserAllowed(env, chat))
-    return sendMessage(env, chat, "🔒 این بات در حال تست خصوصی است.", mainKb);
-
+  if (!isUserAllowed(env, chat)) return sendMessage(env, chat, "🔒 این بات در حال تست خصوصی است.", mainKb);
   const stub = getStub(env, chat);
 
   try {
     if (data === "home") return sendMessage(env, chat, "🏠 منوی اصلی", mainKb);
-    if (data === "new" || data === "cats")
-      return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
-    if (data === "store")
-      return sendMessage(env, chat, STORE_MSG, storeKb);
+    if (data === "new" || data === "cats") return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
+    if (data === "store") return sendMessage(env, chat, STORE_MSG, storeKb);
 
     if (data.startsWith("cat:")) {
       const cat = CATEGORIES.find(c => c.id === data.slice(4));
@@ -575,12 +640,8 @@ async function onCallback(env, cq, allowedUsers) {
 
     if (data.startsWith("draw:")) {
       const t = data.slice(5);
-
       const canDraw = await stub.canDraw(chat);
-      if (!canDraw) {
-        return sendMessage(env, chat, RATE_LIMIT_MSG, ritualKb(t));
-      }
-
+      if (!canDraw) return sendMessage(env, chat, RATE_LIMIT_MSG, ritualKb(t));
       const idx = pickIndex();
       const record = CONTENT[idx];
       await stub.recordEstekhare(chat, t, record.page);
@@ -594,13 +655,10 @@ async function onCallback(env, cq, allowedUsers) {
       const page = stats.last_page;
       const record = CONTENT.find(r => r.page === page);
       if (!record) return sendMessage(env, chat, "⚠️ خطای کوچک؛ لطفاً یک استخارهٔ جدید بگیر.", mainKb);
-
       const alreadyUnlocked = await stub.isUnlocked(chat, page, t);
       if (alreadyUnlocked) return sendMessage(env, chat, premiumMsg(record, t), unlockedKb(t));
-
       const ok = await stub.deductCredit(chat);
       if (!ok) return sendMessage(env, chat, NO_CREDIT_MSG, noCreditKb);
-
       await stub.markUnlocked(chat, page, t);
       return sendMessage(env, chat, premiumMsg(record, t), unlockedKb(t));
     }
@@ -622,15 +680,11 @@ async function onSuccessfulPayment(env, m) {
   const pack = PACKS.find(p => p.id === sp.invoice_payload);
   if (!pack) return;
   const txId = sp.telegram_payment_charge_id;
-  try {
-    const done = await env.USERS_KV.get("tx:" + txId);
-    if (done) return;
-  } catch (e) { /* ignore */ }
+  try { const done = await env.USERS_KV.get("tx:" + txId); if (done) return; } catch {}
   const stub = getStub(env, chat);
   await stub.addCredits(chat, pack.credits + pack.bonus);
-  try { await env.USERS_KV.put("tx:" + txId, JSON.stringify({ pack: pack.id, chat, at: Date.now() })); } catch (e) { /* ignore */ }
-  return sendMessage(env, chat,
-    "🎉 پرداخت موفق!\n\n💎 " + toFa(pack.credits + pack.bonus) + " اعتبار به حساب تو اضافه شد.", mainKb);
+  try { await env.USERS_KV.put("tx:" + txId, JSON.stringify({ pack: pack.id, chat, at: Date.now() })); } catch {}
+  return sendMessage(env, chat, "🎉 پرداخت موفق!\n\n💎 " + toFa(pack.credits + pack.bonus) + " اعتبار به حساب تو اضافه شد.", mainKb);
 }
 
 // ========== 9. MAIN WORKER ==========
@@ -648,63 +702,100 @@ export default {
         const adminUsers = adminStr
           ? adminStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
           : [];
-
         const existingPages = new Set(CONTENT.map(r => r.page));
         const missingPages = [];
-        for (let i = 1; i <= 603; i += 2) {
-          if (!existingPages.has(i)) missingPages.push(i);
-        }
-
+        for (let i = 1; i <= 603; i += 2) { if (!existingPages.has(i)) missingPages.push(i); }
         const pageCounts = {};
         CONTENT.forEach(r => { pageCounts[r.page] = (pageCounts[r.page] || 0) + 1; });
-        const duplicatedPages = Object.entries(pageCounts)
-          .filter((entry) => entry[1] > 1)
-          .map((entry) => entry[0] + " (×" + entry[1] + ")");
+        const duplicatedPages = Object.entries(pageCounts).filter(e => e[1] > 1).map(e => e[0] + " (×" + e[1] + ")");
 
         return new Response(JSON.stringify({
-          version: 20,
-          schema: 5,
-          doPrefix: DO_VERSION_PREFIX,
-          hasToken: !!env.BOT_TOKEN,
-          hasKV: !!env.USERS_KV,
-          hasDO: !!env.CREDIT_MANAGER,
-          records: CONTENT.length,
-          expectedRecords: 302,
-          missingCount: missingPages.length,
-          missingPages: missingPages,
-          duplicatedPages: duplicatedPages,
+          version: 22, schema: 5, doPrefix: DO_VERSION_PREFIX,
+          backupMode: "kv",
+          hasToken: !!env.BOT_TOKEN, hasKV: !!env.USERS_KV, hasDO: !!env.CREDIT_MANAGER,
+          hasAdminSecret: !!env.ADMIN_SECRET,
+          records: CONTENT.length, expectedRecords: 302,
+          missingCount: missingPages.length, missingPages, duplicatedPages,
           wallet: (env.WALLET_TOKEN || "").startsWith("WALLET-TEST") ? "test" : "real",
-          rateLimitMs: DRAW_COOLDOWN_MS,
-          adminsCount: adminUsers.length,
+          rateLimitMs: DRAW_COOLDOWN_MS, adminsCount: adminUsers.length,
+          backupRetentionDays: BACKUP_RETENTION_DAYS,
           privateMode: allowedUsers.length > 0 ? allowedUsers.length + " users allowed" : "public (all users)",
         }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+
+      // ===== Backups: list =====
+      if (url.pathname === "/backups") {
+        if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
+        const list = await listBackups(env);
+        return new Response(JSON.stringify({ count: list.length, items: list }, null, 2), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // ===== Backups: download =====
+      if (url.pathname === "/backup") {
+        if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
+        const backupKey = url.searchParams.get("key");
+        if (!backupKey) return new Response("Missing key", { status: 400 });
+        const raw = await env.USERS_KV.get(backupKey);
+        if (!raw) return new Response("Not found", { status: 404 });
+        return new Response(raw, { headers: { "Content-Type": "application/json" } });
+      }
+
+      // ===== Backups: manual trigger =====
+      if (url.pathname === "/backup-now") {
+        if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
+        const res = await performBackup(env);
+        return new Response(JSON.stringify(res, null, 2), { headers: { "Content-Type": "application/json" } });
       }
 
       return new Response("ok");
     }
 
+    // ===== Backups: restore (POST) =====
     if (request.method === "POST") {
+      const url = new URL(request.url);
+
+      if (url.pathname === "/restore") {
+        if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
+        const backupKey = url.searchParams.get("key");
+        if (!backupKey) return new Response("Missing key", { status: 400 });
+        const raw = await env.USERS_KV.get(backupKey);
+        if (!raw) return new Response("Not found", { status: 404 });
+        const backup = JSON.parse(raw);
+        let restored = 0;
+        for (const uid of Object.keys(backup.users || {})) {
+          try {
+            const stub = getStub(env, parseInt(uid, 10));
+            await stub.restoreData(backup.users[uid]);
+            restored++;
+          } catch (e) { console.error("Restore error for " + uid + ":", e); }
+        }
+        return new Response(JSON.stringify({ success: true, restored, total: Object.keys(backup.users || {}).length }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // ===== webhook =====
       try {
         const u = await request.json();
         const allowedStr = env.ALLOWED_USERS || "";
         const allowedUsers = allowedStr
           ? allowedStr.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
           : [];
-
-        if (u.pre_checkout_query) {
-          await onPreCheckout(env, u.pre_checkout_query);
-        } else if (u.message && u.message.successful_payment) {
-          await onSuccessfulPayment(env, u.message);
-        } else if (u.message) {
-          await onMessage(env, u.message, allowedUsers);
-        } else if (u.callback_query) {
-          await onCallback(env, u.callback_query, allowedUsers);
-        }
-      } catch (e) {
-        console.error("Fetch error:", e);
-      }
+        if (u.pre_checkout_query) await onPreCheckout(env, u.pre_checkout_query);
+        else if (u.message && u.message.successful_payment) await onSuccessfulPayment(env, u.message);
+        else if (u.message) await onMessage(env, u.message, allowedUsers);
+        else if (u.callback_query) await onCallback(env, u.callback_query, allowedUsers);
+      } catch (e) { console.error("Fetch error:", e); }
     }
 
     return new Response("ok");
+  },
+
+  // ========== Cron Trigger ==========
+  async scheduled(event, env, ctx) {
+    console.log("[Cron] Triggered at", new Date().toISOString());
+    ctx.waitUntil(performBackup(env));
   },
 };
