@@ -138,13 +138,12 @@ export class CreditManager extends DurableObject {
     tryAlter(`ALTER TABLE credits ADD COLUMN referred_by TEXT`);
   }
 
-  // 🔑 helper برای SELECT امن (بدون throw روی نتیجه خالی)
   _selectOne(sql, ...params) {
     try {
       const rows = this.ctx.storage.sql.exec(sql, ...params).toArray();
       return rows.length > 0 ? rows[0] : null;
     } catch (e) {
-      console.error("_selectOne error for " + sql.slice(0, 60) + ":", e);
+      console.error("_selectOne error:", e);
       return null;
     }
   }
@@ -153,7 +152,7 @@ export class CreditManager extends DurableObject {
     try {
       return this.ctx.storage.sql.exec(sql, ...params);
     } catch (e) {
-      console.error("_exec error for " + sql.slice(0, 60) + ":", e);
+      console.error("_exec error:", e);
       throw e;
     }
   }
@@ -182,12 +181,6 @@ export class CreditManager extends DurableObject {
         userId, trimmedName, Date.now(), now
       );
     }
-  }
-
-  async getCredits(userId) {
-    this._ensureSchema();
-    const r = this._selectOne(`SELECT amount FROM credits WHERE user_id = ?`, userId);
-    return r ? r.amount : 0;
   }
 
   async addCredits(userId, amount) {
@@ -253,10 +246,7 @@ export class CreditManager extends DurableObject {
          ORDER BY created_at DESC LIMIT ?`,
         userId, lim
       ).toArray();
-    } catch (e) {
-      console.error("getHistory error:", e);
-      return [];
-    }
+    } catch (e) { return []; }
   }
 
   async clearHistory(userId) {
@@ -310,6 +300,17 @@ export class CreditManager extends DurableObject {
     this._exec(`UPDATE credits SET referral_count = referral_count + 1 WHERE user_id = ?`, userId);
   }
 
+  // 🆕 گرفتن لیست دعوت‌شده‌ها
+  async getReferredUsers(userId) {
+    this._ensureSchema();
+    try {
+      return this.ctx.storage.sql.exec(
+        `SELECT referred_id, created_at FROM referrals WHERE referrer_id = ? ORDER BY created_at DESC LIMIT 20`,
+        userId
+      ).toArray();
+    } catch (e) { return []; }
+  }
+
   async exportData() {
     this._ensureSchema();
     const credits = this.ctx.storage.sql.exec(`SELECT * FROM credits`).toArray();
@@ -336,7 +337,7 @@ export class CreditManager extends DurableObject {
             row.last_topic || null, row.last_page || null, row.last_draw_time || 0,
             row.unlocked || "[]", row.name || "", row.joined || 0, new Date().toISOString()
           );
-        } catch (e) { console.error("restore row error:", e); }
+        } catch (e) {}
       }
     } else if (data && data.credits) {
       for (const row of data.credits) {
@@ -356,7 +357,7 @@ export class CreditManager extends DurableObject {
             row.unlocked || "[]", row.name || "", row.joined || 0,
             row.referral_count || 0, row.referred_by || null, new Date().toISOString()
           );
-        } catch (e) { console.error("restore credit error:", e); }
+        } catch (e) {}
       }
       for (const row of data.history || []) {
         try {
@@ -538,7 +539,7 @@ async function listAllUserIds(env) {
 async function performBackup(env) {
   const startedAt = Date.now();
   const userIds = await listAllUserIds(env);
-  console.log("[Backup] Found " + userIds.length + " users in KV");
+  console.log("[Backup] Found " + userIds.length + " users");
 
   const allData = {};
   const chunkSize = 20;
@@ -550,7 +551,6 @@ async function performBackup(env) {
         const data = await stub.exportData();
         return { uid, data };
       } catch (e) {
-        console.error("[Backup] Export error for " + uid + ":", e);
         return { uid, data: null };
       }
     }));
@@ -566,7 +566,6 @@ async function performBackup(env) {
   await env.USERS_KV.put(kvKey, JSON.stringify(backup), { expirationTtl: ttl });
 
   const duration = Date.now() - startedAt;
-  console.log("[Backup] Done: " + kvKey + ", users: " + backup.userCount + ", took " + duration + "ms");
   return { success: true, key: kvKey, userCount: backup.userCount, duration };
 }
 
@@ -636,12 +635,13 @@ function historyKb(history) {
   return { inline_keyboard: rows };
 }
 
-// 🆕 کیبورد referral با دکمه کپی
+// 🆕 کیبورد referral
 function referralKb(link) {
   const rows = [];
   if (link) {
     rows.push([{ text: "📋 کپی لینک دعوت", copy_text: { text: link } }]);
   }
+  rows.push([{ text: "👥 لیست دعوت‌شده‌ها", callback_data: "ref_list" }]);
   rows.push([{ text: "↩️ بازگشت به حساب من", callback_data: "account" }]);
   return { inline_keyboard: rows };
 }
@@ -692,6 +692,22 @@ async function onMessage(env, m, allowedUsers) {
   const stub = getStub(env, chat);
   const isAdmin = isUserAdmin(env, chat);
 
+  // 🆕 debug: log هر /start در KV
+  if (text.startsWith("/start")) {
+    try {
+      await env.USERS_KV.put("debug:last-start:" + chat, JSON.stringify({
+        text: text,
+        textLength: text.length,
+        textChars: text.split("").map(c => c.charCodeAt(0)),
+        chatId: chat,
+        firstName: m.chat.first_name || "",
+        lastName: m.chat.last_name || "",
+        username: m.chat.username || "",
+        timestamp: Date.now(),
+      }), { expirationTtl: 86400 * 7 });
+    } catch (e) { console.error("debug log error:", e); }
+  }
+
   const awaitingRaw = await env.USERS_KV.get("await:" + chat);
   if (awaitingRaw && isAdmin) {
     let awaiting;
@@ -706,15 +722,20 @@ async function onMessage(env, m, allowedUsers) {
     }
   }
 
-  if (text === "/start" || text.startsWith("/start ")) {
+  // 🆕 پارس /start با regex (پشتیبانی از /start@botname و انواع whitespace)
+  const startMatch = text.match(/^\/start(?:@\w+)?(?:\s+(.+))?$/);
+  if (startMatch) {
     try {
-      const parts = text.split(/\s+/);
+      const payload = (startMatch[1] || "").trim();
       let referrerId = null;
-      if (parts[1] && parts[1].startsWith("ref_")) {
-        const refIdStr = parts[1].slice(4);
-        const refId = parseInt(refIdStr, 10);
-        if (!isNaN(refId) && String(refId) !== String(chat)) {
-          referrerId = refId;
+      if (payload) {
+        // پشتیبانی از: ref_123, ref-123, ref123, 123
+        const refMatch = payload.match(/^ref[_\-\s]?(\d+)$/) || payload.match(/^(\d+)$/);
+        if (refMatch) {
+          const rId = parseInt(refMatch[1], 10);
+          if (!isNaN(rId) && String(rId) !== String(chat)) {
+            referrerId = rId;
+          }
         }
       }
 
@@ -743,6 +764,7 @@ async function onMessage(env, m, allowedUsers) {
                 await sendMessage(env, referrerId,
                   "🎉 <b>یه دوست جدید با لینک دعوت تو اومد!</b>\n\n" +
                   "👤 نام: " + refName + "\n" +
+                  "🆔 <code>" + chat + "</code>\n" +
                   "💎 +" + toFa(REFERRAL_REWARD_REFERRER) + " اعتبار هدیه گرفتی.", mainKb);
               } catch (e) { console.error("notify referrer error:", e); }
             }
@@ -796,7 +818,7 @@ async function onMessage(env, m, allowedUsers) {
       });
       if (members.length > 50) lines.push("… و " + toFa(members.length - 50) + " عضو دیگر");
       return sendMessage(env, chat, lines.join("\n\n"), mainKb);
-    } catch (e) { console.error("/members error:", e); return sendMessage(env, chat, "⚠️ خطا در دریافت لیست اعضا.", mainKb); }
+    } catch (e) { return sendMessage(env, chat, "⚠️ خطا در دریافت لیست اعضا.", mainKb); }
   }
 
   if (text === "/backup") {
@@ -806,10 +828,7 @@ async function onMessage(env, m, allowedUsers) {
       const res = await performBackup(env);
       return sendMessage(env, chat,
         "✅ بکاپ انجام شد.\n\n📁 کلید: <code>" + res.key + "</code>\n👥 تعداد: " + toFa(res.userCount) + "\n⏱ " + toFa(res.duration) + "ms", mainKb);
-    } catch (e) {
-      console.error("backup error:", e);
-      return sendMessage(env, chat, "⚠️ خطا در بکاپ: " + e.message, mainKb);
-    }
+    } catch (e) { return sendMessage(env, chat, "⚠️ خطا در بکاپ: " + e.message, mainKb); }
   }
 
   if (text === "/backups") {
@@ -818,14 +837,9 @@ async function onMessage(env, m, allowedUsers) {
       const list = await listBackups(env);
       if (!list.length) return sendMessage(env, chat, "📭 هنوز بکاپی ثبت نشده.", mainKb);
       let lines = ["📦 بکاپ‌ها: " + toFa(list.length), ""];
-      list.slice(0, 15).forEach((b, i) => {
-        lines.push(toFa(i + 1) + ". <code>" + b.key + "</code>");
-      });
+      list.slice(0, 15).forEach((b, i) => { lines.push(toFa(i + 1) + ". <code>" + b.key + "</code>"); });
       return sendMessage(env, chat, lines.join("\n"), mainKb);
-    } catch (e) {
-      console.error("/backups error:", e);
-      return sendMessage(env, chat, "⚠️ خطا در لیست بکاپ‌ها.", mainKb);
-    }
+    } catch (e) { return sendMessage(env, chat, "⚠️ خطا در لیست بکاپ‌ها.", mainKb); }
   }
 
   if (text === "/referral" || text === "/invite") {
@@ -835,24 +849,19 @@ async function onMessage(env, m, allowedUsers) {
     const refCount = stats.referral_count || 0;
 
     if (!link) {
-      return sendMessage(env, chat,
-        "🎁 <b>دعوت دوستان</b>\n\n⚠️ در حال حاضر لینک دعوت در دسترس نیست.", accountKb);
+      return sendMessage(env, chat, "🎁 <b>دعوت دوستان</b>\n\n⚠️ در حال حاضر لینک دعوت در دسترس نیست.", accountKb);
     }
 
     const msg = [
-      "🎁 <b>دعوت دوستان</b>",
-      "",
+      "🎁 <b>دعوت دوستان</b>", "",
       "با هر دعوت موفق، <b>" + toFa(REFERRAL_REWARD_REFERRER) + " اعتبار</b> هدیه بگیر!",
-      "دوستت هم <b>" + toFa(REFERRAL_REWARD_NEW_USER) + " اعتبار اضافه</b> می‌گیره.",
-      "",
+      "دوستت هم <b>" + toFa(REFERRAL_REWARD_NEW_USER) + " اعتبار اضافه</b> می‌گیره.", "",
       "📊 <b>آمار تو:</b>",
       "👥 تعداد دعوت‌های موفق: <b>" + toFa(refCount) + "</b>",
-      "💎 اعتبار کسب‌شده: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>",
-      "",
+      "💎 اعتبار کسب‌شده: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>", "",
       "🔗 <b>لینک اختصاصی تو:</b>",
-      "<code>" + link + "</code>",
-      "",
-      "📤 روی دکمه‌ی زیر بزن تا لینک کپی بشه.",
+      "<code>" + link + "</code>", "",
+      "📤 روی دکمه‌ی زیر بزن تا کپی بشه.",
     ].join("\n");
 
     return sendMessage(env, chat, msg, referralKb(link));
@@ -869,7 +878,7 @@ async function onMessage(env, m, allowedUsers) {
         "\n🔮 استخاره‌ها: " + toFa(s.total_estekhare) +
         "\n🔓 باز شده: " + toFa(s.total_opens) +
         "\n🎁 دعوت‌ها: " + toFa(s.referral_count || 0), accountKb);
-    } catch (e) { console.error("account error:", e); return sendMessage(env, chat, "⚠️ خطا در خواندن حساب.", mainKb); }
+    } catch (e) { return sendMessage(env, chat, "⚠️ خطا در خواندن حساب.", mainKb); }
   }
 
   if (text === "🛍 فروشگاه" || text === "/shop")
@@ -903,17 +912,17 @@ async function onCallback(env, cq, allowedUsers) {
       const hist = await stub.getHistory(chat, HISTORY_LIMIT);
       if (!hist.length) {
         return sendMessage(env, chat,
-          "📜 <b>تاریخچه‌ی استخاره‌ها</b>\n\nهنوز استخاره‌ای ثبت نشده.\nاولین استخاره‌ات رو بگیر! 🌿",
+          "📜 <b>تاریخچه‌ی استخاره‌ها</b>\n\nهنوز استخاره‌ای ثبت نشده.",
           { inline_keyboard: [[{ text: "🔮 استخاره", callback_data: "new" }], [{ text: "↩️ بازگشت", callback_data: "account" }]] });
       }
       return sendMessage(env, chat,
-        "📜 <b>تاریخچه‌ی استخاره‌ها</b>\n\nآخرین " + toFa(hist.length) + " استخاره‌ی تو.\nروی هرکدوم بزن تا دوباره ببینی‌اش:",
+        "📜 <b>تاریخچه‌ی استخاره‌ها</b>\n\nآخرین " + toFa(hist.length) + " استخاره‌ی تو:",
         historyKb(hist));
     }
 
     if (data === "hist_clear") {
       await stub.clearHistory(chat);
-      return sendMessage(env, chat, "✅ تاریخچه‌ی استخاره‌ها پاک شد.", accountKb);
+      return sendMessage(env, chat, "✅ تاریخچه پاک شد.", accountKb);
     }
 
     if (data === "referral") {
@@ -923,27 +932,43 @@ async function onCallback(env, cq, allowedUsers) {
       const refCount = stats.referral_count || 0;
 
       if (!link) {
-        return sendMessage(env, chat,
-          "🎁 <b>دعوت دوستان</b>\n\n⚠️ لینک دعوت در دسترس نیست.", accountKb);
+        return sendMessage(env, chat, "🎁 <b>دعوت دوستان</b>\n\n⚠️ لینک دعوت در دسترس نیست.", accountKb);
       }
 
       const msg = [
-        "🎁 <b>دعوت دوستان</b>",
-        "",
+        "🎁 <b>دعوت دوستان</b>", "",
         "با هر دعوت موفق، <b>" + toFa(REFERRAL_REWARD_REFERRER) + " اعتبار</b> هدیه بگیر!",
-        "دوستت هم <b>" + toFa(REFERRAL_REWARD_NEW_USER) + " اعتبار اضافه</b> می‌گیره.",
-        "",
+        "دوستت هم <b>" + toFa(REFERRAL_REWARD_NEW_USER) + " اعتبار اضافه</b> می‌گیره.", "",
         "📊 <b>آمار تو:</b>",
         "👥 تعداد دعوت‌های موفق: <b>" + toFa(refCount) + "</b>",
-        "💎 اعتبار کسب‌شده: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>",
-        "",
+        "💎 اعتبار کسب‌شده: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>", "",
         "🔗 <b>لینک اختصاصی تو:</b>",
-        "<code>" + link + "</code>",
-        "",
-        "📤 روی دکمه‌ی زیر بزن تا لینک کپی بشه.",
+        "<code>" + link + "</code>", "",
+        "📤 روی دکمه‌ی زیر بزن تا کپی بشه.",
       ].join("\n");
 
       return sendMessage(env, chat, msg, referralKb(link));
+    }
+
+    // 🆕 لیست دعوت‌شده‌ها
+    if (data === "ref_list") {
+      const list = await stub.getReferredUsers(chat);
+      if (!list.length) {
+        return sendMessage(env, chat, "👥 هنوز کسی رو دعوت نکردی.", referralKb(null));
+      }
+      const lines = ["👥 <b>افرادی که دعوت کردی:</b>", ""];
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        // نام کاربر رو از KV بگیر
+        let name = "";
+        try {
+          const raw = await env.USERS_KV.get("user:" + item.referred_id);
+          if (raw) { const u = JSON.parse(raw); name = u.name || ""; }
+        } catch (e) {}
+        const date = new Date(item.created_at).toLocaleDateString("fa-IR");
+        lines.push(toFa(i + 1) + ". " + (name || "بدون نام") + "\n🆔 <code>" + item.referred_id + "</code>\n📅 " + date);
+      }
+      return sendMessage(env, chat, lines.join("\n\n"), referralKb(null));
     }
 
     if (data.startsWith("hist_open:")) {
@@ -1047,9 +1072,11 @@ export default {
         const pageCounts = {};
         CONTENT.forEach(r => { pageCounts[r.page] = (pageCounts[r.page] || 0) + 1; });
         const duplicatedPages = Object.entries(pageCounts).filter(e => e[1] > 1).map(e => e[0] + " (×" + e[1] + ")");
+        const botUsername = await getBotUsername(env);
 
         return new Response(JSON.stringify({
-          version: 25, schema: 5, doPrefix: DO_VERSION_PREFIX,
+          version: 26, schema: 5, doPrefix: DO_VERSION_PREFIX,
+          botUsername: botUsername || "(unknown)",
           backupMode: "kv", historyLimit: HISTORY_LIMIT,
           referral: { referrerReward: REFERRAL_REWARD_REFERRER, newUserReward: REFERRAL_REWARD_NEW_USER },
           hasToken: !!env.BOT_TOKEN, hasKV: !!env.USERS_KV, hasDO: !!env.CREDIT_MANAGER,
@@ -1063,7 +1090,21 @@ export default {
         }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
 
-      // 🆕 debug endpoint
+      // 🆕 debug last /start
+      if (url.pathname === "/debug-start") {
+        if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
+        const uid = url.searchParams.get("uid");
+        if (!uid) return new Response("Missing uid", { status: 400 });
+        try {
+          const raw = await env.USERS_KV.get("debug:last-start:" + uid);
+          return new Response(raw || "No /start logged for this uid", {
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: e.message }, null, 2), { status: 500, headers: { "Content-Type": "application/json" } });
+        }
+      }
+
       if (url.pathname === "/debug-do") {
         if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
         const uid = url.searchParams.get("uid");
@@ -1073,11 +1114,12 @@ export default {
           const stats = await stub.getStats(uid);
           const canDraw = await stub.canDraw(uid);
           const history = await stub.getHistory(uid, 5);
-          return new Response(JSON.stringify({ success: true, stats, canDraw, history }, null, 2), {
+          const referred = await stub.getReferredUsers(uid);
+          return new Response(JSON.stringify({ success: true, stats, canDraw, history, referred }, null, 2), {
             headers: { "Content-Type": "application/json" },
           });
         } catch (e) {
-          return new Response(JSON.stringify({ success: false, error: e.message, stack: e.stack }, null, 2), {
+          return new Response(JSON.stringify({ success: false, error: e.message }, null, 2), {
             status: 500, headers: { "Content-Type": "application/json" },
           });
         }
@@ -1125,7 +1167,7 @@ export default {
             const stub = getStub(env, parseInt(uid, 10));
             await stub.restoreData(backup.users[uid]);
             restored++;
-          } catch (e) { console.error("Restore error for " + uid + ":", e); }
+          } catch (e) { console.error("Restore error:", e); }
         }
         return new Response(JSON.stringify({ success: true, restored, total: Object.keys(backup.users || {}).length }), {
           headers: { "Content-Type": "application/json" },
