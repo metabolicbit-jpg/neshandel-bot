@@ -5,7 +5,7 @@ import { CONTENT } from "./content/index.js";
 // ========== 2. CONSTANTS ==========
 const API_BASE = "https://tapi.bale.ai";
 const DRAW_COOLDOWN_MS = 5000;
-const DO_VERSION_PREFIX = "v3:";
+const DO_VERSION_PREFIX = "v4:";
 const BACKUP_RETENTION_DAYS = 30;
 const HISTORY_LIMIT = 10;
 const REFERRAL_REWARD_REFERRER = 1;
@@ -75,6 +75,10 @@ const ALIAS = { trade:"transaction", business2:"business" };
 export class CreditManager extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this._ensureSchema();
+  }
+
+  _ensureSchema() {
     try {
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS credits (
@@ -93,7 +97,7 @@ export class CreditManager extends DurableObject {
           last_updated TEXT NOT NULL
         );
       `);
-    } catch (e) { console.error("DO create table error:", e); }
+    } catch (e) { console.error("ensureSchema credits error:", e); }
 
     try {
       this.ctx.storage.sql.exec(`
@@ -108,19 +112,18 @@ export class CreditManager extends DurableObject {
           created_at INTEGER NOT NULL
         );
       `);
-    } catch (e) { console.error("DO create history table error:", e); }
+    } catch (e) { console.error("ensureSchema history error:", e); }
 
-    // 🆕 جدول referrals
     try {
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS referrals (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           referrer_id TEXT NOT NULL,
-          referred_id TEXT NOT NULL UNIQUE,
+          referred_id TEXT NOT NULL,
           created_at INTEGER NOT NULL
         );
       `);
-    } catch (e) { console.error("DO create referrals table error:", e); }
+    } catch (e) { console.error("ensureSchema referrals error:", e); }
 
     const tryAlter = (sql) => { try { this.ctx.storage.sql.exec(sql); } catch (e) {} };
     tryAlter(`ALTER TABLE credits ADD COLUMN total_estekhare INTEGER NOT NULL DEFAULT 0`);
@@ -135,24 +138,46 @@ export class CreditManager extends DurableObject {
     tryAlter(`ALTER TABLE credits ADD COLUMN referred_by TEXT`);
   }
 
+  // 🔑 helper برای SELECT امن (بدون throw روی نتیجه خالی)
+  _selectOne(sql, ...params) {
+    try {
+      const rows = this.ctx.storage.sql.exec(sql, ...params).toArray();
+      return rows.length > 0 ? rows[0] : null;
+    } catch (e) {
+      console.error("_selectOne error for " + sql.slice(0, 60) + ":", e);
+      return null;
+    }
+  }
+
+  _exec(sql, ...params) {
+    try {
+      return this.ctx.storage.sql.exec(sql, ...params);
+    } catch (e) {
+      console.error("_exec error for " + sql.slice(0, 60) + ":", e);
+      throw e;
+    }
+  }
+
   async getStats(userId) {
-    const r = this.ctx.storage.sql.exec(`SELECT * FROM credits WHERE user_id = ?`, userId).one();
+    this._ensureSchema();
+    const r = this._selectOne(`SELECT * FROM credits WHERE user_id = ?`, userId);
     if (r) return r;
     return { user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0, last_topic: null, last_page: null, last_draw_time: 0, unlocked: "[]", name: "", joined: 0, referral_count: 0, referred_by: null };
   }
 
   async ensureUser(userId, name) {
+    this._ensureSchema();
     const now = new Date().toISOString();
     const trimmedName = (name || "").trim();
-    const existing = this.ctx.storage.sql.exec(`SELECT user_id FROM credits WHERE user_id = ?`, userId).one();
+    const existing = this._selectOne(`SELECT user_id FROM credits WHERE user_id = ?`, userId);
     if (existing) {
       if (trimmedName) {
-        this.ctx.storage.sql.exec(`UPDATE credits SET name = ?, last_updated = ? WHERE user_id = ?`, trimmedName, now, userId);
+        this._exec(`UPDATE credits SET name = ?, last_updated = ? WHERE user_id = ?`, trimmedName, now, userId);
       } else {
-        this.ctx.storage.sql.exec(`UPDATE credits SET last_updated = ? WHERE user_id = ?`, now, userId);
+        this._exec(`UPDATE credits SET last_updated = ? WHERE user_id = ?`, now, userId);
       }
     } else {
-      this.ctx.storage.sql.exec(
+      this._exec(
         `INSERT INTO credits (user_id, amount, name, joined, last_updated) VALUES (?, 0, ?, ?, ?)`,
         userId, trimmedName, Date.now(), now
       );
@@ -160,13 +185,15 @@ export class CreditManager extends DurableObject {
   }
 
   async getCredits(userId) {
-    const r = this.ctx.storage.sql.exec(`SELECT amount FROM credits WHERE user_id = ?`, userId).one();
+    this._ensureSchema();
+    const r = this._selectOne(`SELECT amount FROM credits WHERE user_id = ?`, userId);
     return r ? r.amount : 0;
   }
 
   async addCredits(userId, amount) {
+    this._ensureSchema();
     const now = new Date().toISOString();
-    this.ctx.storage.sql.exec(
+    this._exec(
       `INSERT INTO credits (user_id, amount, last_updated) VALUES (?, ?, ?)
        ON CONFLICT(user_id) DO UPDATE SET amount = amount + excluded.amount, last_updated = excluded.last_updated`,
       userId, amount, now
@@ -174,7 +201,8 @@ export class CreditManager extends DurableObject {
   }
 
   async deductCredit(userId) {
-    const r = this.ctx.storage.sql.exec(
+    this._ensureSchema();
+    const r = this._exec(
       `UPDATE credits SET amount = amount - 1, total_opens = total_opens + 1, last_updated = ?
        WHERE user_id = ? AND amount > 0`,
       new Date().toISOString(), userId
@@ -183,17 +211,19 @@ export class CreditManager extends DurableObject {
   }
 
   async canDraw(userId) {
+    this._ensureSchema();
     try {
-      const r = this.ctx.storage.sql.exec(`SELECT last_draw_time FROM credits WHERE user_id = ?`, userId).one();
+      const r = this._selectOne(`SELECT last_draw_time FROM credits WHERE user_id = ?`, userId);
       if (!r || !r.last_draw_time) return true;
       return (Date.now() - r.last_draw_time) >= DRAW_COOLDOWN_MS;
     } catch (e) { console.error("canDraw error:", e); return true; }
   }
 
   async recordEstekhare(userId, topic, page, surah, ayah, level) {
+    this._ensureSchema();
     const now = new Date().toISOString();
     const ts = Date.now();
-    this.ctx.storage.sql.exec(
+    this._exec(
       `INSERT INTO credits (user_id, amount, total_estekhare, last_topic, last_page, last_draw_time, last_updated) 
        VALUES (?, 0, 1, ?, ?, ?, ?)
        ON CONFLICT(user_id) DO UPDATE SET
@@ -205,7 +235,7 @@ export class CreditManager extends DurableObject {
       userId, topic, page, ts, now
     );
     try {
-      this.ctx.storage.sql.exec(
+      this._exec(
         `INSERT INTO estekhare_history (user_id, topic, page, surah, ayah, level, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         userId, topic, page, surah || "", ayah || 0, level || "", ts
@@ -214,71 +244,74 @@ export class CreditManager extends DurableObject {
   }
 
   async getHistory(userId, limit) {
+    this._ensureSchema();
     const lim = limit || HISTORY_LIMIT;
-    return this.ctx.storage.sql.exec(
-      `SELECT id, topic, page, surah, ayah, level, created_at 
-       FROM estekhare_history WHERE user_id = ? 
-       ORDER BY created_at DESC LIMIT ?`,
-      userId, lim
-    ).toArray();
+    try {
+      return this.ctx.storage.sql.exec(
+        `SELECT id, topic, page, surah, ayah, level, created_at 
+         FROM estekhare_history WHERE user_id = ? 
+         ORDER BY created_at DESC LIMIT ?`,
+        userId, lim
+      ).toArray();
+    } catch (e) {
+      console.error("getHistory error:", e);
+      return [];
+    }
   }
 
   async clearHistory(userId) {
-    this.ctx.storage.sql.exec(`DELETE FROM estekhare_history WHERE user_id = ?`, userId);
+    this._ensureSchema();
+    this._exec(`DELETE FROM estekhare_history WHERE user_id = ?`, userId);
   }
 
   async getHistoryItem(userId, id) {
-    const r = this.ctx.storage.sql.exec(
-      `SELECT * FROM estekhare_history WHERE user_id = ? AND id = ?`, userId, id
-    ).one();
-    return r || null;
+    this._ensureSchema();
+    return this._selectOne(`SELECT * FROM estekhare_history WHERE user_id = ? AND id = ?`, userId, id);
   }
 
   async isUnlocked(userId, page, topic) {
-    const r = this.ctx.storage.sql.exec(`SELECT unlocked FROM credits WHERE user_id = ?`, userId).one();
+    this._ensureSchema();
+    const r = this._selectOne(`SELECT unlocked FROM credits WHERE user_id = ?`, userId);
     if (!r || !r.unlocked) return false;
     try { return JSON.parse(r.unlocked).includes(page + ":" + topic); } catch { return false; }
   }
 
   async markUnlocked(userId, page, topic) {
-    const r = this.ctx.storage.sql.exec(`SELECT unlocked FROM credits WHERE user_id = ?`, userId).one();
+    this._ensureSchema();
+    const r = this._selectOne(`SELECT unlocked FROM credits WHERE user_id = ?`, userId);
     let arr = [];
     if (r && r.unlocked) { try { arr = JSON.parse(r.unlocked); } catch {} }
     const key = page + ":" + topic;
     if (!arr.includes(key)) arr.push(key);
-    this.ctx.storage.sql.exec(
+    this._exec(
       `UPDATE credits SET unlocked = ?, last_updated = ? WHERE user_id = ?`,
       JSON.stringify(arr), new Date().toISOString(), userId
     );
   }
 
-  // 🆕 Referral methods
+  // ===== Referral =====
   async hasBeenReferred(userId) {
-    const r = this.ctx.storage.sql.exec(
-      `SELECT referred_id FROM referrals WHERE referred_id = ?`, userId
-    ).one();
+    this._ensureSchema();
+    const r = this._selectOne(`SELECT referred_id FROM referrals WHERE referred_id = ?`, userId);
     return !!r;
   }
 
   async addReferral(referrerId, referredId) {
-    this.ctx.storage.sql.exec(
+    this._ensureSchema();
+    this._exec(
       `INSERT INTO referrals (referrer_id, referred_id, created_at) VALUES (?, ?, ?)`,
       referrerId, referredId, Date.now()
     );
-    this.ctx.storage.sql.exec(
-      `UPDATE credits SET referred_by = ? WHERE user_id = ?`,
-      referrerId, referredId
-    );
+    this._exec(`UPDATE credits SET referred_by = ? WHERE user_id = ?`, referrerId, referredId);
   }
 
   async incrementReferralCount(userId) {
-    this.ctx.storage.sql.exec(
-      `UPDATE credits SET referral_count = referral_count + 1 WHERE user_id = ?`,
-      userId
-    );
+    this._ensureSchema();
+    this._exec(`UPDATE credits SET referral_count = referral_count + 1 WHERE user_id = ?`, userId);
   }
 
   async exportData() {
+    this._ensureSchema();
     const credits = this.ctx.storage.sql.exec(`SELECT * FROM credits`).toArray();
     const history = this.ctx.storage.sql.exec(`SELECT * FROM estekhare_history`).toArray();
     const referrals = this.ctx.storage.sql.exec(`SELECT * FROM referrals`).toArray();
@@ -286,43 +319,48 @@ export class CreditManager extends DurableObject {
   }
 
   async restoreData(data) {
+    this._ensureSchema();
     if (Array.isArray(data)) {
       for (const row of data) {
-        this.ctx.storage.sql.exec(
-          `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, last_updated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(user_id) DO UPDATE SET
-             amount = excluded.amount, total_estekhare = excluded.total_estekhare,
-             total_opens = excluded.total_opens, last_topic = excluded.last_topic,
-             last_page = excluded.last_page, last_draw_time = excluded.last_draw_time,
-             unlocked = excluded.unlocked, name = excluded.name,
-             joined = excluded.joined, last_updated = excluded.last_updated`,
-          row.user_id, row.amount || 0, row.total_estekhare || 0, row.total_opens || 0,
-          row.last_topic || null, row.last_page || null, row.last_draw_time || 0,
-          row.unlocked || "[]", row.name || "", row.joined || 0, new Date().toISOString()
-        );
+        try {
+          this._exec(
+            `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, last_updated)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id) DO UPDATE SET
+               amount = excluded.amount, total_estekhare = excluded.total_estekhare,
+               total_opens = excluded.total_opens, last_topic = excluded.last_topic,
+               last_page = excluded.last_page, last_draw_time = excluded.last_draw_time,
+               unlocked = excluded.unlocked, name = excluded.name,
+               joined = excluded.joined, last_updated = excluded.last_updated`,
+            row.user_id, row.amount || 0, row.total_estekhare || 0, row.total_opens || 0,
+            row.last_topic || null, row.last_page || null, row.last_draw_time || 0,
+            row.unlocked || "[]", row.name || "", row.joined || 0, new Date().toISOString()
+          );
+        } catch (e) { console.error("restore row error:", e); }
       }
     } else if (data && data.credits) {
       for (const row of data.credits) {
-        this.ctx.storage.sql.exec(
-          `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, referral_count, referred_by, last_updated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(user_id) DO UPDATE SET
-             amount = excluded.amount, total_estekhare = excluded.total_estekhare,
-             total_opens = excluded.total_opens, last_topic = excluded.last_topic,
-             last_page = excluded.last_page, last_draw_time = excluded.last_draw_time,
-             unlocked = excluded.unlocked, name = excluded.name,
-             joined = excluded.joined, referral_count = excluded.referral_count,
-             referred_by = excluded.referred_by, last_updated = excluded.last_updated`,
-          row.user_id, row.amount || 0, row.total_estekhare || 0, row.total_opens || 0,
-          row.last_topic || null, row.last_page || null, row.last_draw_time || 0,
-          row.unlocked || "[]", row.name || "", row.joined || 0,
-          row.referral_count || 0, row.referred_by || null, new Date().toISOString()
-        );
+        try {
+          this._exec(
+            `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, referral_count, referred_by, last_updated)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id) DO UPDATE SET
+               amount = excluded.amount, total_estekhare = excluded.total_estekhare,
+               total_opens = excluded.total_opens, last_topic = excluded.last_topic,
+               last_page = excluded.last_page, last_draw_time = excluded.last_draw_time,
+               unlocked = excluded.unlocked, name = excluded.name,
+               joined = excluded.joined, referral_count = excluded.referral_count,
+               referred_by = excluded.referred_by, last_updated = excluded.last_updated`,
+            row.user_id, row.amount || 0, row.total_estekhare || 0, row.total_opens || 0,
+            row.last_topic || null, row.last_page || null, row.last_draw_time || 0,
+            row.unlocked || "[]", row.name || "", row.joined || 0,
+            row.referral_count || 0, row.referred_by || null, new Date().toISOString()
+          );
+        } catch (e) { console.error("restore credit error:", e); }
       }
       for (const row of data.history || []) {
         try {
-          this.ctx.storage.sql.exec(
+          this._exec(
             `INSERT INTO estekhare_history (user_id, topic, page, surah, ayah, level, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             row.user_id, row.topic, row.page, row.surah || "", row.ayah || 0, row.level || "", row.created_at || Date.now()
@@ -331,7 +369,7 @@ export class CreditManager extends DurableObject {
       }
       for (const row of data.referrals || []) {
         try {
-          this.ctx.storage.sql.exec(
+          this._exec(
             `INSERT INTO referrals (referrer_id, referred_id, created_at) VALUES (?, ?, ?)`,
             row.referrer_id, row.referred_id, row.created_at || Date.now()
           );
@@ -371,7 +409,6 @@ function getStub(env, userId) {
   return env.CREDIT_MANAGER.get(id);
 }
 
-// 🆕 Bot username cache (in KV برای ۷ روز)
 async function getBotUsername(env) {
   try {
     const cached = await env.USERS_KV.get("bot_username");
@@ -556,7 +593,6 @@ const resultKb = (t) => ({ inline_keyboard: [[{ text: "💎 استخاره تخ�
 const unlockedKb = (t) => ({ inline_keyboard: [[{ text: "📖 مشاهدهٔ استخاره تخصصی", callback_data: "view:" + t }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] });
 const noCreditKb = { inline_keyboard: [[{ text: "🛍 مشاهدهٔ بسته‌ها", callback_data: "store" }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] };
 
-// 🆕 accountKb با دکمه‌ی referral
 const accountKb = { inline_keyboard: [
   [{ text: "📜 تاریخچه‌ی استخاره‌ها", callback_data: "history" }],
   [{ text: "🎁 دعوت دوستان", callback_data: "referral" }],
@@ -596,6 +632,16 @@ function historyKb(history) {
     rows.push([{ text: txt, callback_data: "hist_open:" + h.id }]);
   });
   rows.push([{ text: "🗑 پاک کردن تاریخچه", callback_data: "hist_clear" }]);
+  rows.push([{ text: "↩️ بازگشت به حساب من", callback_data: "account" }]);
+  return { inline_keyboard: rows };
+}
+
+// 🆕 کیبورد referral با دکمه کپی
+function referralKb(link) {
+  const rows = [];
+  if (link) {
+    rows.push([{ text: "📋 کپی لینک دعوت", copy_text: { text: link } }]);
+  }
   rows.push([{ text: "↩️ بازگشت به حساب من", callback_data: "account" }]);
   return { inline_keyboard: rows };
 }
@@ -662,7 +708,6 @@ async function onMessage(env, m, allowedUsers) {
 
   if (text === "/start" || text.startsWith("/start ")) {
     try {
-      // 🆕 پارس پارامتر referral
       const parts = text.split(/\s+/);
       let referrerId = null;
       if (parts[1] && parts[1].startsWith("ref_")) {
@@ -680,21 +725,19 @@ async function onMessage(env, m, allowedUsers) {
       let bonus = 0;
       let referralApplied = false;
 
-      // 🆕 پردازش referral فقط برای کاربر جدید
       if (isNew && referrerId) {
         try {
           const alreadyReferred = await stub.hasBeenReferred(chat);
           if (!alreadyReferred) {
             const refStub = getStub(env, referrerId);
             const refStats = await refStub.getStats(referrerId);
-            if (refStats.joined) {
+            if (refStats && refStats.joined) {
               await stub.addReferral(referrerId, chat);
               await refStub.incrementReferralCount(referrerId);
               await refStub.addCredits(referrerId, REFERRAL_REWARD_REFERRER);
               bonus = REFERRAL_REWARD_NEW_USER;
               referralApplied = true;
 
-              // نوتیفیکیشن به دعوت‌کننده
               const refName = cleanName || "یه کاربر جدید";
               try {
                 await sendMessage(env, referrerId,
@@ -785,7 +828,6 @@ async function onMessage(env, m, allowedUsers) {
     }
   }
 
-  // 🆕 دستور /referral
   if (text === "/referral" || text === "/invite") {
     const username = await getBotUsername(env);
     const stats = await stub.getStats(chat);
@@ -794,9 +836,7 @@ async function onMessage(env, m, allowedUsers) {
 
     if (!link) {
       return sendMessage(env, chat,
-        "🎁 <b>دعوت دوستان</b>\n\n" +
-        "⚠️ در حال حاضر لینک دعوت در دسترس نیست.\n" +
-        "لطفاً بعداً تلاش کن یا با پشتیبانی تماس بگیر.", accountKb);
+        "🎁 <b>دعوت دوستان</b>\n\n⚠️ در حال حاضر لینک دعوت در دسترس نیست.", accountKb);
     }
 
     const msg = [
@@ -807,16 +847,15 @@ async function onMessage(env, m, allowedUsers) {
       "",
       "📊 <b>آمار تو:</b>",
       "👥 تعداد دعوت‌های موفق: <b>" + toFa(refCount) + "</b>",
-      "💎 اعتبار کسب‌شده از دعوت: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>",
+      "💎 اعتبار کسب‌شده: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>",
       "",
       "🔗 <b>لینک اختصاصی تو:</b>",
       "<code>" + link + "</code>",
       "",
-      "📤 این لینک رو کپی کن و برای دوستت بفرست.",
-      "وقتی با این لینک وارد بشه، هر دو هدیه می‌گیرید. 🌿",
+      "📤 روی دکمه‌ی زیر بزن تا لینک کپی بشه.",
     ].join("\n");
 
-    return sendMessage(env, chat, msg, accountKb);
+    return sendMessage(env, chat, msg, referralKb(link));
   }
 
   if (text === "🔮 استخاره" || text === "/estekhare")
@@ -877,7 +916,6 @@ async function onCallback(env, cq, allowedUsers) {
       return sendMessage(env, chat, "✅ تاریخچه‌ی استخاره‌ها پاک شد.", accountKb);
     }
 
-    // 🆕 نمایش referral از دکمه
     if (data === "referral") {
       const username = await getBotUsername(env);
       const stats = await stub.getStats(chat);
@@ -886,7 +924,7 @@ async function onCallback(env, cq, allowedUsers) {
 
       if (!link) {
         return sendMessage(env, chat,
-          "🎁 <b>دعوت دوستان</b>\n\n⚠️ لینک دعوت در دسترس نیست. بعداً تلاش کن.", accountKb);
+          "🎁 <b>دعوت دوستان</b>\n\n⚠️ لینک دعوت در دسترس نیست.", accountKb);
       }
 
       const msg = [
@@ -897,16 +935,15 @@ async function onCallback(env, cq, allowedUsers) {
         "",
         "📊 <b>آمار تو:</b>",
         "👥 تعداد دعوت‌های موفق: <b>" + toFa(refCount) + "</b>",
-        "💎 اعتبار کسب‌شده از دعوت: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>",
+        "💎 اعتبار کسب‌شده: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>",
         "",
         "🔗 <b>لینک اختصاصی تو:</b>",
         "<code>" + link + "</code>",
         "",
-        "📤 این لینک رو کپی کن و برای دوستت بفرست.",
-        "وقتی با این لینک وارد بشه، هر دو هدیه می‌گیرید. 🌿",
+        "📤 روی دکمه‌ی زیر بزن تا لینک کپی بشه.",
       ].join("\n");
 
-      return sendMessage(env, chat, msg, accountKb);
+      return sendMessage(env, chat, msg, referralKb(link));
     }
 
     if (data.startsWith("hist_open:")) {
@@ -1012,7 +1049,7 @@ export default {
         const duplicatedPages = Object.entries(pageCounts).filter(e => e[1] > 1).map(e => e[0] + " (×" + e[1] + ")");
 
         return new Response(JSON.stringify({
-          version: 24, schema: 5, doPrefix: DO_VERSION_PREFIX,
+          version: 25, schema: 5, doPrefix: DO_VERSION_PREFIX,
           backupMode: "kv", historyLimit: HISTORY_LIMIT,
           referral: { referrerReward: REFERRAL_REWARD_REFERRER, newUserReward: REFERRAL_REWARD_NEW_USER },
           hasToken: !!env.BOT_TOKEN, hasKV: !!env.USERS_KV, hasDO: !!env.CREDIT_MANAGER,
@@ -1024,6 +1061,26 @@ export default {
           backupRetentionDays: BACKUP_RETENTION_DAYS,
           privateMode: allowedUsers.length > 0 ? allowedUsers.length + " users allowed" : "public (all users)",
         }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+
+      // 🆕 debug endpoint
+      if (url.pathname === "/debug-do") {
+        if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
+        const uid = url.searchParams.get("uid");
+        if (!uid) return new Response("Missing uid", { status: 400 });
+        try {
+          const stub = getStub(env, uid);
+          const stats = await stub.getStats(uid);
+          const canDraw = await stub.canDraw(uid);
+          const history = await stub.getHistory(uid, 5);
+          return new Response(JSON.stringify({ success: true, stats, canDraw, history }, null, 2), {
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ success: false, error: e.message, stack: e.stack }, null, 2), {
+            status: 500, headers: { "Content-Type": "application/json" },
+          });
+        }
       }
 
       if (url.pathname === "/backups") {
