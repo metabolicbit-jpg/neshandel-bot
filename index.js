@@ -300,7 +300,6 @@ export class CreditManager extends DurableObject {
     this._exec(`UPDATE credits SET referral_count = referral_count + 1 WHERE user_id = ?`, userId);
   }
 
-  // 🆕 گرفتن لیست دعوت‌شده‌ها
   async getReferredUsers(userId) {
     this._ensureSchema();
     try {
@@ -309,6 +308,15 @@ export class CreditManager extends DurableObject {
         userId
       ).toArray();
     } catch (e) { return []; }
+  }
+
+  // 🆕 ریست کامل DO
+  async resetData() {
+    this._ensureSchema();
+    try { this._exec(`DELETE FROM credits`); } catch (e) {}
+    try { this._exec(`DELETE FROM estekhare_history`); } catch (e) {}
+    try { this._exec(`DELETE FROM referrals`); } catch (e) {}
+    return true;
   }
 
   async exportData() {
@@ -635,7 +643,6 @@ function historyKb(history) {
   return { inline_keyboard: rows };
 }
 
-// 🆕 کیبورد referral
 function referralKb(link) {
   const rows = [];
   if (link) {
@@ -692,20 +699,13 @@ async function onMessage(env, m, allowedUsers) {
   const stub = getStub(env, chat);
   const isAdmin = isUserAdmin(env, chat);
 
-  // 🆕 debug: log هر /start در KV
+  // debug log
   if (text.startsWith("/start")) {
     try {
       await env.USERS_KV.put("debug:last-start:" + chat, JSON.stringify({
-        text: text,
-        textLength: text.length,
-        textChars: text.split("").map(c => c.charCodeAt(0)),
-        chatId: chat,
-        firstName: m.chat.first_name || "",
-        lastName: m.chat.last_name || "",
-        username: m.chat.username || "",
-        timestamp: Date.now(),
+        text, textLength: text.length, chatId: chat, timestamp: Date.now(),
       }), { expirationTtl: 86400 * 7 });
-    } catch (e) { console.error("debug log error:", e); }
+    } catch (e) {}
   }
 
   const awaitingRaw = await env.USERS_KV.get("await:" + chat);
@@ -722,14 +722,45 @@ async function onMessage(env, m, allowedUsers) {
     }
   }
 
-  // 🆕 پارس /start با regex (پشتیبانی از /start@botname و انواع whitespace)
+  // 🆕 /resetme — ریست DO کاربر جاری (برای تست)
+  if (text === "/resetme") {
+    try {
+      await stub.resetData();
+      try { await env.USERS_KV.delete("user:" + chat); } catch (e) {}
+      return sendMessage(env, chat,
+        "🔄 <b>حساب شما ریست شد.</b>\n\n" +
+        "حالا اگه با لینک دعوت دوستت `/start ref_XXX` بزنی، referral اعمال می‌شه.\n\n" +
+        "برای تست: اول از دوستت لینک دعوت بگیر، بعد بزن `/start ref_<chatId>`.",
+        mainKb);
+    } catch (e) {
+      console.error("/resetme error:", e);
+      return sendMessage(env, chat, "⚠️ خطا در ریست.", mainKb);
+    }
+  }
+
+  // 🆕 /resetuser <chatId> — ادمین هر کاربر رو ریست کنه
+  const resetMatch = text.match(/^\/resetuser\s+(\d+)$/);
+  if (resetMatch) {
+    if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
+    const targetUid = resetMatch[1];
+    try {
+      const targetStub = getStub(env, targetUid);
+      await targetStub.resetData();
+      try { await env.USERS_KV.delete("user:" + targetUid); } catch (e) {}
+      return sendMessage(env, chat,
+        "🔄 کاربر <code>" + targetUid + "</code> ریست شد.\n\nحالا می‌تونه با لینک دعوت وارد بشه.",
+        mainKb);
+    } catch (e) {
+      return sendMessage(env, chat, "⚠️ خطا: " + e.message, mainKb);
+    }
+  }
+
   const startMatch = text.match(/^\/start(?:@\w+)?(?:\s+(.+))?$/);
   if (startMatch) {
     try {
       const payload = (startMatch[1] || "").trim();
       let referrerId = null;
       if (payload) {
-        // پشتیبانی از: ref_123, ref-123, ref123, 123
         const refMatch = payload.match(/^ref[_\-\s]?(\d+)$/) || payload.match(/^(\d+)$/);
         if (refMatch) {
           const rId = parseInt(refMatch[1], 10);
@@ -950,7 +981,6 @@ async function onCallback(env, cq, allowedUsers) {
       return sendMessage(env, chat, msg, referralKb(link));
     }
 
-    // 🆕 لیست دعوت‌شده‌ها
     if (data === "ref_list") {
       const list = await stub.getReferredUsers(chat);
       if (!list.length) {
@@ -959,7 +989,6 @@ async function onCallback(env, cq, allowedUsers) {
       const lines = ["👥 <b>افرادی که دعوت کردی:</b>", ""];
       for (let i = 0; i < list.length; i++) {
         const item = list[i];
-        // نام کاربر رو از KV بگیر
         let name = "";
         try {
           const raw = await env.USERS_KV.get("user:" + item.referred_id);
@@ -1075,7 +1104,7 @@ export default {
         const botUsername = await getBotUsername(env);
 
         return new Response(JSON.stringify({
-          version: 26, schema: 5, doPrefix: DO_VERSION_PREFIX,
+          version: 27, schema: 5, doPrefix: DO_VERSION_PREFIX,
           botUsername: botUsername || "(unknown)",
           backupMode: "kv", historyLimit: HISTORY_LIMIT,
           referral: { referrerReward: REFERRAL_REWARD_REFERRER, newUserReward: REFERRAL_REWARD_NEW_USER },
@@ -1090,16 +1119,13 @@ export default {
         }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
 
-      // 🆕 debug last /start
       if (url.pathname === "/debug-start") {
         if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
         const uid = url.searchParams.get("uid");
         if (!uid) return new Response("Missing uid", { status: 400 });
         try {
           const raw = await env.USERS_KV.get("debug:last-start:" + uid);
-          return new Response(raw || "No /start logged for this uid", {
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(raw || "No /start logged", { headers: { "Content-Type": "application/json" } });
         } catch (e) {
           return new Response(JSON.stringify({ error: e.message }, null, 2), { status: 500, headers: { "Content-Type": "application/json" } });
         }
@@ -1112,25 +1138,19 @@ export default {
         try {
           const stub = getStub(env, uid);
           const stats = await stub.getStats(uid);
-          const canDraw = await stub.canDraw(uid);
-          const history = await stub.getHistory(uid, 5);
           const referred = await stub.getReferredUsers(uid);
-          return new Response(JSON.stringify({ success: true, stats, canDraw, history, referred }, null, 2), {
+          return new Response(JSON.stringify({ success: true, stats, referred }, null, 2), {
             headers: { "Content-Type": "application/json" },
           });
         } catch (e) {
-          return new Response(JSON.stringify({ success: false, error: e.message }, null, 2), {
-            status: 500, headers: { "Content-Type": "application/json" },
-          });
+          return new Response(JSON.stringify({ success: false, error: e.message }, null, 2), { status: 500, headers: { "Content-Type": "application/json" } });
         }
       }
 
       if (url.pathname === "/backups") {
         if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
         const list = await listBackups(env);
-        return new Response(JSON.stringify({ count: list.length, items: list }, null, 2), {
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ count: list.length, items: list }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
 
       if (url.pathname === "/backup") {
