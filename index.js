@@ -5,9 +5,12 @@ import { CONTENT } from "./content/index.js";
 // ========== 2. CONSTANTS ==========
 const API_BASE = "https://tapi.bale.ai";
 const DRAW_COOLDOWN_MS = 5000;
-const DO_VERSION_PREFIX = "v2:";
+const DO_VERSION_PREFIX = "v3:";
 const BACKUP_RETENTION_DAYS = 30;
 const HISTORY_LIMIT = 10;
+const REFERRAL_REWARD_REFERRER = 1;
+const REFERRAL_REWARD_NEW_USER = 1;
+const REFERRAL_BASE_LINK = "https://ble.ir/";
 
 const CATEGORIES = [
   { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
@@ -57,6 +60,7 @@ const PACKS = [
 const DISCLAIMER = "⚖️ سلب مسئولیت و نکته مهم فقهی: فراموش نکنید که در احکام اسلامی، استخاره جایگزین عقل، تحقیق و مشورت نیست و «وحی منزل» محسوب نمی‌شود. این متن صرفاً یک تفسیر و راهنمای معنوی بر اساس آیات قرآن است. لذا برای تصمیمات حساس زندگی‌تان، حتماً در کنار این استخاره، با متخصصان و مشاوران کارآزمودهٔ آن حوزه مشورت فرمایید. 🤝";
 
 const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
+const WELCOME_REFERRAL = "🎁 <b>به «نشانِ دل» خوش آمدی!</b>\n\nبا لینک دعوت دوستت اومدی — <b>۳ اعتبار هدیه</b> گرفتی (۲ + ۱ جایزه).\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
 const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
 const STORE_MSG = "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = یک استخارهٔ تخصصی با تحلیل کامل موضوع تو\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاد:";
 const NO_CREDIT_MSG = "🌿 دوست عزیز، اعتبارت تموم شده.\n\nبرای دیدن استخارهٔ تخصصی همین موضوع، یکی از بسته‌ها رو انتخاب کن؛ کمتر از یک دقیقه شارژ می‌شه. 🌙";
@@ -84,12 +88,13 @@ export class CreditManager extends DurableObject {
           unlocked TEXT DEFAULT '[]',
           name TEXT DEFAULT '',
           joined INTEGER DEFAULT 0,
+          referral_count INTEGER NOT NULL DEFAULT 0,
+          referred_by TEXT,
           last_updated TEXT NOT NULL
         );
       `);
     } catch (e) { console.error("DO create table error:", e); }
 
-    // 🆕 جدول تاریخچه
     try {
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS estekhare_history (
@@ -105,6 +110,18 @@ export class CreditManager extends DurableObject {
       `);
     } catch (e) { console.error("DO create history table error:", e); }
 
+    // 🆕 جدول referrals
+    try {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS referrals (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          referrer_id TEXT NOT NULL,
+          referred_id TEXT NOT NULL UNIQUE,
+          created_at INTEGER NOT NULL
+        );
+      `);
+    } catch (e) { console.error("DO create referrals table error:", e); }
+
     const tryAlter = (sql) => { try { this.ctx.storage.sql.exec(sql); } catch (e) {} };
     tryAlter(`ALTER TABLE credits ADD COLUMN total_estekhare INTEGER NOT NULL DEFAULT 0`);
     tryAlter(`ALTER TABLE credits ADD COLUMN total_opens INTEGER NOT NULL DEFAULT 0`);
@@ -114,12 +131,14 @@ export class CreditManager extends DurableObject {
     tryAlter(`ALTER TABLE credits ADD COLUMN unlocked TEXT DEFAULT '[]'`);
     tryAlter(`ALTER TABLE credits ADD COLUMN name TEXT DEFAULT ''`);
     tryAlter(`ALTER TABLE credits ADD COLUMN joined INTEGER DEFAULT 0`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN referral_count INTEGER NOT NULL DEFAULT 0`);
+    tryAlter(`ALTER TABLE credits ADD COLUMN referred_by TEXT`);
   }
 
   async getStats(userId) {
     const r = this.ctx.storage.sql.exec(`SELECT * FROM credits WHERE user_id = ?`, userId).one();
     if (r) return r;
-    return { user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0, last_topic: null, last_page: null, last_draw_time: 0, unlocked: "[]", name: "", joined: 0 };
+    return { user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0, last_topic: null, last_page: null, last_draw_time: 0, unlocked: "[]", name: "", joined: 0, referral_count: 0, referred_by: null };
   }
 
   async ensureUser(userId, name) {
@@ -185,7 +204,6 @@ export class CreditManager extends DurableObject {
          last_updated = excluded.last_updated`,
       userId, topic, page, ts, now
     );
-    // 🆕 ذخیره در تاریخچه
     try {
       this.ctx.storage.sql.exec(
         `INSERT INTO estekhare_history (user_id, topic, page, surah, ayah, level, created_at)
@@ -195,32 +213,23 @@ export class CreditManager extends DurableObject {
     } catch (e) { console.error("addHistory error:", e); }
   }
 
-  // 🆕 خوندن تاریخچه
   async getHistory(userId, limit) {
     const lim = limit || HISTORY_LIMIT;
-    const rows = this.ctx.storage.sql.exec(
+    return this.ctx.storage.sql.exec(
       `SELECT id, topic, page, surah, ayah, level, created_at 
-       FROM estekhare_history 
-       WHERE user_id = ? 
-       ORDER BY created_at DESC 
-       LIMIT ?`,
+       FROM estekhare_history WHERE user_id = ? 
+       ORDER BY created_at DESC LIMIT ?`,
       userId, lim
     ).toArray();
-    return rows;
   }
 
-  // 🆕 پاک کردن تاریخچه
   async clearHistory(userId) {
-    this.ctx.storage.sql.exec(
-      `DELETE FROM estekhare_history WHERE user_id = ?`, userId
-    );
+    this.ctx.storage.sql.exec(`DELETE FROM estekhare_history WHERE user_id = ?`, userId);
   }
 
-  // 🆕 پیدا کردن یه رکورد خاص از تاریخچه
   async getHistoryItem(userId, id) {
     const r = this.ctx.storage.sql.exec(
-      `SELECT * FROM estekhare_history WHERE user_id = ? AND id = ?`,
-      userId, id
+      `SELECT * FROM estekhare_history WHERE user_id = ? AND id = ?`, userId, id
     ).one();
     return r || null;
   }
@@ -243,16 +252,41 @@ export class CreditManager extends DurableObject {
     );
   }
 
+  // 🆕 Referral methods
+  async hasBeenReferred(userId) {
+    const r = this.ctx.storage.sql.exec(
+      `SELECT referred_id FROM referrals WHERE referred_id = ?`, userId
+    ).one();
+    return !!r;
+  }
+
+  async addReferral(referrerId, referredId) {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO referrals (referrer_id, referred_id, created_at) VALUES (?, ?, ?)`,
+      referrerId, referredId, Date.now()
+    );
+    this.ctx.storage.sql.exec(
+      `UPDATE credits SET referred_by = ? WHERE user_id = ?`,
+      referrerId, referredId
+    );
+  }
+
+  async incrementReferralCount(userId) {
+    this.ctx.storage.sql.exec(
+      `UPDATE credits SET referral_count = referral_count + 1 WHERE user_id = ?`,
+      userId
+    );
+  }
+
   async exportData() {
     const credits = this.ctx.storage.sql.exec(`SELECT * FROM credits`).toArray();
     const history = this.ctx.storage.sql.exec(`SELECT * FROM estekhare_history`).toArray();
-    return { credits, history };
+    const referrals = this.ctx.storage.sql.exec(`SELECT * FROM referrals`).toArray();
+    return { credits, history, referrals };
   }
 
   async restoreData(data) {
-    // پشتیبانی از هر دو فرمت قدیم و جدید
     if (Array.isArray(data)) {
-      // فرمت قدیم: فقط credits
       for (const row of data) {
         this.ctx.storage.sql.exec(
           `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, last_updated)
@@ -269,20 +303,21 @@ export class CreditManager extends DurableObject {
         );
       }
     } else if (data && data.credits) {
-      // فرمت جدید: credits + history
       for (const row of data.credits) {
         this.ctx.storage.sql.exec(
-          `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, last_updated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, referral_count, referred_by, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(user_id) DO UPDATE SET
              amount = excluded.amount, total_estekhare = excluded.total_estekhare,
              total_opens = excluded.total_opens, last_topic = excluded.last_topic,
              last_page = excluded.last_page, last_draw_time = excluded.last_draw_time,
              unlocked = excluded.unlocked, name = excluded.name,
-             joined = excluded.joined, last_updated = excluded.last_updated`,
+             joined = excluded.joined, referral_count = excluded.referral_count,
+             referred_by = excluded.referred_by, last_updated = excluded.last_updated`,
           row.user_id, row.amount || 0, row.total_estekhare || 0, row.total_opens || 0,
           row.last_topic || null, row.last_page || null, row.last_draw_time || 0,
-          row.unlocked || "[]", row.name || "", row.joined || 0, new Date().toISOString()
+          row.unlocked || "[]", row.name || "", row.joined || 0,
+          row.referral_count || 0, row.referred_by || null, new Date().toISOString()
         );
       }
       for (const row of data.history || []) {
@@ -292,7 +327,15 @@ export class CreditManager extends DurableObject {
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             row.user_id, row.topic, row.page, row.surah || "", row.ayah || 0, row.level || "", row.created_at || Date.now()
           );
-        } catch (e) { /* ignore duplicate */ }
+        } catch (e) {}
+      }
+      for (const row of data.referrals || []) {
+        try {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO referrals (referrer_id, referred_id, created_at) VALUES (?, ?, ?)`,
+            row.referrer_id, row.referred_id, row.created_at || Date.now()
+          );
+        } catch (e) {}
       }
     }
   }
@@ -326,6 +369,28 @@ const answerPreCheckout = (env, id, ok, error_message) =>
 function getStub(env, userId) {
   const id = env.CREDIT_MANAGER.idFromName(DO_VERSION_PREFIX + String(userId));
   return env.CREDIT_MANAGER.get(id);
+}
+
+// 🆕 Bot username cache (in KV برای ۷ روز)
+async function getBotUsername(env) {
+  try {
+    const cached = await env.USERS_KV.get("bot_username");
+    if (cached) return cached;
+  } catch (e) {}
+  try {
+    const res = await baleCall(env, "getMe", {});
+    if (res.ok && res.result && res.result.username) {
+      const username = res.result.username;
+      try { await env.USERS_KV.put("bot_username", username, { expirationTtl: 86400 * 7 }); } catch (e) {}
+      return username;
+    }
+  } catch (e) { console.error("getBotUsername error:", e); }
+  return null;
+}
+
+function buildReferralLink(username, chatId) {
+  if (!username) return null;
+  return REFERRAL_BASE_LINK + username + "?start=ref_" + chatId;
 }
 
 function isUserAllowed(env, chatId) {
@@ -418,7 +483,6 @@ async function listMembers(env) {
   return members;
 }
 
-// ========== 5.b BACKUP HELPERS ==========
 async function listAllUserIds(env) {
   const ids = [];
   let cursor;
@@ -458,16 +522,9 @@ async function performBackup(env) {
     }
   }
 
-  const backup = {
-    timestamp: startedAt,
-    date: new Date(startedAt).toISOString(),
-    userCount: Object.keys(allData).length,
-    users: allData,
-  };
-
+  const backup = { timestamp: startedAt, date: new Date(startedAt).toISOString(), userCount: Object.keys(allData).length, users: allData };
   const dateKey = new Date(startedAt).toISOString().split("T")[0];
   const kvKey = "backup:" + dateKey;
-
   const ttl = (BACKUP_RETENTION_DAYS + 5) * 24 * 60 * 60;
   await env.USERS_KV.put(kvKey, JSON.stringify(backup), { expirationTtl: ttl });
 
@@ -499,9 +556,10 @@ const resultKb = (t) => ({ inline_keyboard: [[{ text: "💎 استخاره تخ�
 const unlockedKb = (t) => ({ inline_keyboard: [[{ text: "📖 مشاهدهٔ استخاره تخصصی", callback_data: "view:" + t }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] });
 const noCreditKb = { inline_keyboard: [[{ text: "🛍 مشاهدهٔ بسته‌ها", callback_data: "store" }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] };
 
-// 🆕 کیبورد حساب من با دکمه‌ی تاریخچه
+// 🆕 accountKb با دکمه‌ی referral
 const accountKb = { inline_keyboard: [
   [{ text: "📜 تاریخچه‌ی استخاره‌ها", callback_data: "history" }],
+  [{ text: "🎁 دعوت دوستان", callback_data: "referral" }],
   [{ text: "🛍 فروشگاه", callback_data: "store" }],
 ]};
 
@@ -529,7 +587,6 @@ function topicKb(catId) {
   return { inline_keyboard: rows };
 }
 
-// 🆕 کیبورد تاریخچه
 function historyKb(history) {
   const rows = [];
   history.forEach((h) => {
@@ -603,16 +660,65 @@ async function onMessage(env, m, allowedUsers) {
     }
   }
 
-  if (text === "/start") {
+  if (text === "/start" || text.startsWith("/start ")) {
     try {
+      // 🆕 پارس پارامتر referral
+      const parts = text.split(/\s+/);
+      let referrerId = null;
+      if (parts[1] && parts[1].startsWith("ref_")) {
+        const refIdStr = parts[1].slice(4);
+        const refId = parseInt(refIdStr, 10);
+        if (!isNaN(refId) && String(refId) !== String(chat)) {
+          referrerId = refId;
+        }
+      }
+
       const cleanName = ((m.chat.first_name || "") + " " + (m.chat.last_name || "")).trim();
       const stats = await stub.getStats(chat);
       const isNew = !stats.joined;
+
+      let bonus = 0;
+      let referralApplied = false;
+
+      // 🆕 پردازش referral فقط برای کاربر جدید
+      if (isNew && referrerId) {
+        try {
+          const alreadyReferred = await stub.hasBeenReferred(chat);
+          if (!alreadyReferred) {
+            const refStub = getStub(env, referrerId);
+            const refStats = await refStub.getStats(referrerId);
+            if (refStats.joined) {
+              await stub.addReferral(referrerId, chat);
+              await refStub.incrementReferralCount(referrerId);
+              await refStub.addCredits(referrerId, REFERRAL_REWARD_REFERRER);
+              bonus = REFERRAL_REWARD_NEW_USER;
+              referralApplied = true;
+
+              // نوتیفیکیشن به دعوت‌کننده
+              const refName = cleanName || "یه کاربر جدید";
+              try {
+                await sendMessage(env, referrerId,
+                  "🎉 <b>یه دوست جدید با لینک دعوت تو اومد!</b>\n\n" +
+                  "👤 نام: " + refName + "\n" +
+                  "💎 +" + toFa(REFERRAL_REWARD_REFERRER) + " اعتبار هدیه گرفتی.", mainKb);
+              } catch (e) { console.error("notify referrer error:", e); }
+            }
+          }
+        } catch (e) { console.error("referral processing error:", e); }
+      }
+
       await stub.ensureUser(chat, cleanName);
-      if (isNew) await stub.addCredits(chat, 2);
+      if (isNew) {
+        await stub.addCredits(chat, 2 + bonus);
+      }
+
       try { await env.USERS_KV.put("user:" + chat, JSON.stringify({ name: cleanName, joined: Date.now() })); } catch (e) {}
-      return sendMessage(env, chat, WELCOME, mainKb);
-    } catch (e) { console.error("/start error:", e); return sendMessage(env, chat, START_ERROR_MSG, mainKb); }
+
+      return sendMessage(env, chat, referralApplied ? WELCOME_REFERRAL : WELCOME, mainKb);
+    } catch (e) {
+      console.error("/start error:", e);
+      return sendMessage(env, chat, START_ERROR_MSG, mainKb);
+    }
   }
 
   if (text === "/cancel") {
@@ -679,6 +785,40 @@ async function onMessage(env, m, allowedUsers) {
     }
   }
 
+  // 🆕 دستور /referral
+  if (text === "/referral" || text === "/invite") {
+    const username = await getBotUsername(env);
+    const stats = await stub.getStats(chat);
+    const link = buildReferralLink(username, chat);
+    const refCount = stats.referral_count || 0;
+
+    if (!link) {
+      return sendMessage(env, chat,
+        "🎁 <b>دعوت دوستان</b>\n\n" +
+        "⚠️ در حال حاضر لینک دعوت در دسترس نیست.\n" +
+        "لطفاً بعداً تلاش کن یا با پشتیبانی تماس بگیر.", accountKb);
+    }
+
+    const msg = [
+      "🎁 <b>دعوت دوستان</b>",
+      "",
+      "با هر دعوت موفق، <b>" + toFa(REFERRAL_REWARD_REFERRER) + " اعتبار</b> هدیه بگیر!",
+      "دوستت هم <b>" + toFa(REFERRAL_REWARD_NEW_USER) + " اعتبار اضافه</b> می‌گیره.",
+      "",
+      "📊 <b>آمار تو:</b>",
+      "👥 تعداد دعوت‌های موفق: <b>" + toFa(refCount) + "</b>",
+      "💎 اعتبار کسب‌شده از دعوت: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>",
+      "",
+      "🔗 <b>لینک اختصاصی تو:</b>",
+      "<code>" + link + "</code>",
+      "",
+      "📤 این لینک رو کپی کن و برای دوستت بفرست.",
+      "وقتی با این لینک وارد بشه، هر دو هدیه می‌گیرید. 🌿",
+    ].join("\n");
+
+    return sendMessage(env, chat, msg, accountKb);
+  }
+
   if (text === "🔮 استخاره" || text === "/estekhare")
     return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
 
@@ -688,7 +828,8 @@ async function onMessage(env, m, allowedUsers) {
       return sendMessage(env, chat,
         "👤 <b>حساب من</b>\n\n💎 اعتبار: " + toFa(s.amount) +
         "\n🔮 استخاره‌ها: " + toFa(s.total_estekhare) +
-        "\n🔓 باز شده: " + toFa(s.total_opens), accountKb);
+        "\n🔓 باز شده: " + toFa(s.total_opens) +
+        "\n🎁 دعوت‌ها: " + toFa(s.referral_count || 0), accountKb);
     } catch (e) { console.error("account error:", e); return sendMessage(env, chat, "⚠️ خطا در خواندن حساب.", mainKb); }
   }
 
@@ -715,10 +856,10 @@ async function onCallback(env, cq, allowedUsers) {
       return sendMessage(env, chat,
         "👤 <b>حساب من</b>\n\n💎 اعتبار: " + toFa(s.amount) +
         "\n🔮 استخاره‌ها: " + toFa(s.total_estekhare) +
-        "\n🔓 باز شده: " + toFa(s.total_opens), accountKb);
+        "\n🔓 باز شده: " + toFa(s.total_opens) +
+        "\n🎁 دعوت‌ها: " + toFa(s.referral_count || 0), accountKb);
     }
 
-    // 🆕 نمایش تاریخچه
     if (data === "history") {
       const hist = await stub.getHistory(chat, HISTORY_LIMIT);
       if (!hist.length) {
@@ -731,23 +872,50 @@ async function onCallback(env, cq, allowedUsers) {
         historyKb(hist));
     }
 
-    // 🆕 پاک کردن تاریخچه
     if (data === "hist_clear") {
       await stub.clearHistory(chat);
       return sendMessage(env, chat, "✅ تاریخچه‌ی استخاره‌ها پاک شد.", accountKb);
     }
 
-    // 🆕 بازکردن یه مورد از تاریخچه
+    // 🆕 نمایش referral از دکمه
+    if (data === "referral") {
+      const username = await getBotUsername(env);
+      const stats = await stub.getStats(chat);
+      const link = buildReferralLink(username, chat);
+      const refCount = stats.referral_count || 0;
+
+      if (!link) {
+        return sendMessage(env, chat,
+          "🎁 <b>دعوت دوستان</b>\n\n⚠️ لینک دعوت در دسترس نیست. بعداً تلاش کن.", accountKb);
+      }
+
+      const msg = [
+        "🎁 <b>دعوت دوستان</b>",
+        "",
+        "با هر دعوت موفق، <b>" + toFa(REFERRAL_REWARD_REFERRER) + " اعتبار</b> هدیه بگیر!",
+        "دوستت هم <b>" + toFa(REFERRAL_REWARD_NEW_USER) + " اعتبار اضافه</b> می‌گیره.",
+        "",
+        "📊 <b>آمار تو:</b>",
+        "👥 تعداد دعوت‌های موفق: <b>" + toFa(refCount) + "</b>",
+        "💎 اعتبار کسب‌شده از دعوت: <b>" + toFa(refCount * REFERRAL_REWARD_REFERRER) + "</b>",
+        "",
+        "🔗 <b>لینک اختصاصی تو:</b>",
+        "<code>" + link + "</code>",
+        "",
+        "📤 این لینک رو کپی کن و برای دوستت بفرست.",
+        "وقتی با این لینک وارد بشه، هر دو هدیه می‌گیرید. 🌿",
+      ].join("\n");
+
+      return sendMessage(env, chat, msg, accountKb);
+    }
+
     if (data.startsWith("hist_open:")) {
       const id = parseInt(data.slice(10), 10);
       if (isNaN(id)) return sendMessage(env, chat, "⚠️ خطای داده.", mainKb);
       const item = await stub.getHistoryItem(chat, id);
       if (!item) return sendMessage(env, chat, "⚠️ این مورد پیدا نشد.", mainKb);
-
       const record = CONTENT.find(r => r.page === item.page);
       if (!record) return sendMessage(env, chat, "⚠️ محتوای این صفحه موجود نیست.", mainKb);
-
-      // نمایش پیام رایگان + دکمه‌ی باز کردن تحلیل
       const alreadyUnlocked = await stub.isUnlocked(chat, item.page, item.topic);
       const kb = alreadyUnlocked
         ? { inline_keyboard: [[{ text: "📖 مشاهدهٔ تحلیل تخصصی", callback_data: "view:" + item.topic }], [{ text: "↩️ بازگشت", callback_data: "history" }]] }
@@ -778,7 +946,6 @@ async function onCallback(env, cq, allowedUsers) {
       if (!canDraw) return sendMessage(env, chat, RATE_LIMIT_MSG, ritualKb(t));
       const idx = pickIndex();
       const record = CONTENT[idx];
-      // 🆕 ذخیره با تمام اطلاعات لازم
       await stub.recordEstekhare(chat, t, record.page, record.surah, record.ayah, record.level);
       await sendMessage(env, chat, "🔮 در حال انجام استخاره...");
       return sendMessage(env, chat, freeMsg(record, t), resultKb(t));
@@ -845,8 +1012,9 @@ export default {
         const duplicatedPages = Object.entries(pageCounts).filter(e => e[1] > 1).map(e => e[0] + " (×" + e[1] + ")");
 
         return new Response(JSON.stringify({
-          version: 23, schema: 5, doPrefix: DO_VERSION_PREFIX,
+          version: 24, schema: 5, doPrefix: DO_VERSION_PREFIX,
           backupMode: "kv", historyLimit: HISTORY_LIMIT,
+          referral: { referrerReward: REFERRAL_REWARD_REFERRER, newUserReward: REFERRAL_REWARD_NEW_USER },
           hasToken: !!env.BOT_TOKEN, hasKV: !!env.USERS_KV, hasDO: !!env.CREDIT_MANAGER,
           hasAdminSecret: !!env.ADMIN_SECRET,
           records: CONTENT.length, expectedRecords: 302,
