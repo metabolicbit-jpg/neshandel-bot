@@ -17,12 +17,11 @@ class_name = "CreditManager"
 tag = "v1"
 new_sqlite_classes = ["CreditManager"]
 
-# ========== متغیرها ==========
+# ========== متغیرهای غیرحساس ==========
 [vars]
 CURRENT_PHASE = "1"
-ALLOWED_USERS = ""
 
-# ========== Cron Trigger (هر شب ۳ صبح UTC) ==========
+# ========== Cron Trigger ==========
 [triggers]
 crons = ["0 3 * * *"]
 
