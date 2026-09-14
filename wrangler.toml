@@ -1,7 +1,7 @@
 name = "neshandel-bot"
 main = "index.js"
 compatibility_date = "2024-04-03"
-keep_vars = true                # ← این خط اضافه بشه
+keep_vars = true                # ← ایـن خط اضافه بشه
 
 # ========== KV ==========
 [[kv_namespaces]]
