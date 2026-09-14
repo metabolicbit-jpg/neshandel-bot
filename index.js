@@ -7,6 +7,7 @@ const API_BASE = "https://tapi.bale.ai";
 const DRAW_COOLDOWN_MS = 5000;
 const DO_VERSION_PREFIX = "v2:";
 const BACKUP_RETENTION_DAYS = 30;
+const HISTORY_LIMIT = 10;
 
 const CATEGORIES = [
   { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
@@ -88,6 +89,22 @@ export class CreditManager extends DurableObject {
       `);
     } catch (e) { console.error("DO create table error:", e); }
 
+    // 🆕 جدول تاریخچه
+    try {
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS estekhare_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT NOT NULL,
+          topic TEXT NOT NULL,
+          page INTEGER NOT NULL,
+          surah TEXT,
+          ayah INTEGER,
+          level TEXT,
+          created_at INTEGER NOT NULL
+        );
+      `);
+    } catch (e) { console.error("DO create history table error:", e); }
+
     const tryAlter = (sql) => { try { this.ctx.storage.sql.exec(sql); } catch (e) {} };
     tryAlter(`ALTER TABLE credits ADD COLUMN total_estekhare INTEGER NOT NULL DEFAULT 0`);
     tryAlter(`ALTER TABLE credits ADD COLUMN total_opens INTEGER NOT NULL DEFAULT 0`);
@@ -154,8 +171,9 @@ export class CreditManager extends DurableObject {
     } catch (e) { console.error("canDraw error:", e); return true; }
   }
 
-  async recordEstekhare(userId, topic, page) {
+  async recordEstekhare(userId, topic, page, surah, ayah, level) {
     const now = new Date().toISOString();
+    const ts = Date.now();
     this.ctx.storage.sql.exec(
       `INSERT INTO credits (user_id, amount, total_estekhare, last_topic, last_page, last_draw_time, last_updated) 
        VALUES (?, 0, 1, ?, ?, ?, ?)
@@ -165,8 +183,46 @@ export class CreditManager extends DurableObject {
          last_page = excluded.last_page,
          last_draw_time = excluded.last_draw_time,
          last_updated = excluded.last_updated`,
-      userId, topic, page, Date.now(), now
+      userId, topic, page, ts, now
     );
+    // 🆕 ذخیره در تاریخچه
+    try {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO estekhare_history (user_id, topic, page, surah, ayah, level, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        userId, topic, page, surah || "", ayah || 0, level || "", ts
+      );
+    } catch (e) { console.error("addHistory error:", e); }
+  }
+
+  // 🆕 خوندن تاریخچه
+  async getHistory(userId, limit) {
+    const lim = limit || HISTORY_LIMIT;
+    const rows = this.ctx.storage.sql.exec(
+      `SELECT id, topic, page, surah, ayah, level, created_at 
+       FROM estekhare_history 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT ?`,
+      userId, lim
+    ).toArray();
+    return rows;
+  }
+
+  // 🆕 پاک کردن تاریخچه
+  async clearHistory(userId) {
+    this.ctx.storage.sql.exec(
+      `DELETE FROM estekhare_history WHERE user_id = ?`, userId
+    );
+  }
+
+  // 🆕 پیدا کردن یه رکورد خاص از تاریخچه
+  async getHistoryItem(userId, id) {
+    const r = this.ctx.storage.sql.exec(
+      `SELECT * FROM estekhare_history WHERE user_id = ? AND id = ?`,
+      userId, id
+    ).one();
+    return r || null;
   }
 
   async isUnlocked(userId, page, topic) {
@@ -187,40 +243,57 @@ export class CreditManager extends DurableObject {
     );
   }
 
-  // 🆕 برای بکاپ: خروجی کامل داده‌های این کاربر
   async exportData() {
-    return this.ctx.storage.sql.exec(`SELECT * FROM credits`).toArray();
+    const credits = this.ctx.storage.sql.exec(`SELECT * FROM credits`).toArray();
+    const history = this.ctx.storage.sql.exec(`SELECT * FROM estekhare_history`).toArray();
+    return { credits, history };
   }
 
-  // 🆕 برای بازگردانی
-  async restoreData(rows) {
-    for (const row of rows) {
-      this.ctx.storage.sql.exec(
-        `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, last_updated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-           amount = excluded.amount,
-           total_estekhare = excluded.total_estekhare,
-           total_opens = excluded.total_opens,
-           last_topic = excluded.last_topic,
-           last_page = excluded.last_page,
-           last_draw_time = excluded.last_draw_time,
-           unlocked = excluded.unlocked,
-           name = excluded.name,
-           joined = excluded.joined,
-           last_updated = excluded.last_updated`,
-        row.user_id,
-        row.amount || 0,
-        row.total_estekhare || 0,
-        row.total_opens || 0,
-        row.last_topic || null,
-        row.last_page || null,
-        row.last_draw_time || 0,
-        row.unlocked || "[]",
-        row.name || "",
-        row.joined || 0,
-        new Date().toISOString()
-      );
+  async restoreData(data) {
+    // پشتیبانی از هر دو فرمت قدیم و جدید
+    if (Array.isArray(data)) {
+      // فرمت قدیم: فقط credits
+      for (const row of data) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(user_id) DO UPDATE SET
+             amount = excluded.amount, total_estekhare = excluded.total_estekhare,
+             total_opens = excluded.total_opens, last_topic = excluded.last_topic,
+             last_page = excluded.last_page, last_draw_time = excluded.last_draw_time,
+             unlocked = excluded.unlocked, name = excluded.name,
+             joined = excluded.joined, last_updated = excluded.last_updated`,
+          row.user_id, row.amount || 0, row.total_estekhare || 0, row.total_opens || 0,
+          row.last_topic || null, row.last_page || null, row.last_draw_time || 0,
+          row.unlocked || "[]", row.name || "", row.joined || 0, new Date().toISOString()
+        );
+      }
+    } else if (data && data.credits) {
+      // فرمت جدید: credits + history
+      for (const row of data.credits) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO credits (user_id, amount, total_estekhare, total_opens, last_topic, last_page, last_draw_time, unlocked, name, joined, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(user_id) DO UPDATE SET
+             amount = excluded.amount, total_estekhare = excluded.total_estekhare,
+             total_opens = excluded.total_opens, last_topic = excluded.last_topic,
+             last_page = excluded.last_page, last_draw_time = excluded.last_draw_time,
+             unlocked = excluded.unlocked, name = excluded.name,
+             joined = excluded.joined, last_updated = excluded.last_updated`,
+          row.user_id, row.amount || 0, row.total_estekhare || 0, row.total_opens || 0,
+          row.last_topic || null, row.last_page || null, row.last_draw_time || 0,
+          row.unlocked || "[]", row.name || "", row.joined || 0, new Date().toISOString()
+        );
+      }
+      for (const row of data.history || []) {
+        try {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO estekhare_history (user_id, topic, page, surah, ayah, level, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            row.user_id, row.topic, row.page, row.surah || "", row.ayah || 0, row.level || "", row.created_at || Date.now()
+          );
+        } catch (e) { /* ignore duplicate */ }
+      }
     }
   }
 }
@@ -345,7 +418,7 @@ async function listMembers(env) {
   return members;
 }
 
-// ========== 5.b BACKUP HELPERS (KV-based) ==========
+// ========== 5.b BACKUP HELPERS ==========
 async function listAllUserIds(env) {
   const ids = [];
   let cursor;
@@ -373,15 +446,15 @@ async function performBackup(env) {
     const results = await Promise.all(chunk.map(async (uid) => {
       try {
         const stub = getStub(env, uid);
-        const rows = await stub.exportData();
-        return { uid, rows };
+        const data = await stub.exportData();
+        return { uid, data };
       } catch (e) {
         console.error("[Backup] Export error for " + uid + ":", e);
-        return { uid, rows: [] };
+        return { uid, data: null };
       }
     }));
     for (const r of results) {
-      if (r.rows && r.rows.length) allData[r.uid] = r.rows;
+      if (r.data) allData[r.uid] = r.data;
     }
   }
 
@@ -395,7 +468,6 @@ async function performBackup(env) {
   const dateKey = new Date(startedAt).toISOString().split("T")[0];
   const kvKey = "backup:" + dateKey;
 
-  // ذخیره در KV با TTL = retention + 5 روز (برای اطمینان)
   const ttl = (BACKUP_RETENTION_DAYS + 5) * 24 * 60 * 60;
   await env.USERS_KV.put(kvKey, JSON.stringify(backup), { expirationTtl: ttl });
 
@@ -427,6 +499,12 @@ const resultKb = (t) => ({ inline_keyboard: [[{ text: "💎 استخاره تخ�
 const unlockedKb = (t) => ({ inline_keyboard: [[{ text: "📖 مشاهدهٔ استخاره تخصصی", callback_data: "view:" + t }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] });
 const noCreditKb = { inline_keyboard: [[{ text: "🛍 مشاهدهٔ بسته‌ها", callback_data: "store" }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] };
 
+// 🆕 کیبورد حساب من با دکمه‌ی تاریخچه
+const accountKb = { inline_keyboard: [
+  [{ text: "📜 تاریخچه‌ی استخاره‌ها", callback_data: "history" }],
+  [{ text: "🛍 فروشگاه", callback_data: "store" }],
+]};
+
 function catKb() {
   const rows = [];
   for (let i = 0; i < CATEGORIES.length; i += 2) {
@@ -448,6 +526,20 @@ function topicKb(catId) {
   }
   if (pair) rows.push([pair]);
   rows.push([{ text: "↩️ بازگشت", callback_data: "cats" }]);
+  return { inline_keyboard: rows };
+}
+
+// 🆕 کیبورد تاریخچه
+function historyKb(history) {
+  const rows = [];
+  history.forEach((h) => {
+    const date = new Date(h.created_at);
+    const dateStr = date.toLocaleDateString("fa-IR");
+    const txt = "📄 ص" + toFa(h.page) + " | " + topicShort(h.topic) + " | " + dateStr;
+    rows.push([{ text: txt, callback_data: "hist_open:" + h.id }]);
+  });
+  rows.push([{ text: "🗑 پاک کردن تاریخچه", callback_data: "hist_clear" }]);
+  rows.push([{ text: "↩️ بازگشت به حساب من", callback_data: "account" }]);
   return { inline_keyboard: rows };
 }
 
@@ -564,10 +656,7 @@ async function onMessage(env, m, allowedUsers) {
     try {
       const res = await performBackup(env);
       return sendMessage(env, chat,
-        "✅ بکاپ انجام شد.\n\n" +
-        "📁 کلید: <code>" + res.key + "</code>\n" +
-        "👥 تعداد کاربران: " + toFa(res.userCount) + "\n" +
-        "⏱ زمان: " + toFa(res.duration) + "ms", mainKb);
+        "✅ بکاپ انجام شد.\n\n📁 کلید: <code>" + res.key + "</code>\n👥 تعداد: " + toFa(res.userCount) + "\n⏱ " + toFa(res.duration) + "ms", mainKb);
     } catch (e) {
       console.error("backup error:", e);
       return sendMessage(env, chat, "⚠️ خطا در بکاپ: " + e.message, mainKb);
@@ -579,7 +668,7 @@ async function onMessage(env, m, allowedUsers) {
     try {
       const list = await listBackups(env);
       if (!list.length) return sendMessage(env, chat, "📭 هنوز بکاپی ثبت نشده.", mainKb);
-      let lines = ["📦 بکاپ‌های موجود: " + toFa(list.length), ""];
+      let lines = ["📦 بکاپ‌ها: " + toFa(list.length), ""];
       list.slice(0, 15).forEach((b, i) => {
         lines.push(toFa(i + 1) + ". <code>" + b.key + "</code>");
       });
@@ -593,13 +682,13 @@ async function onMessage(env, m, allowedUsers) {
   if (text === "🔮 استخاره" || text === "/estekhare")
     return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
 
-  if (text === "👤 حساب من") {
+  if (text === "👤 حساب من" || text === "/account") {
     try {
       const s = await stub.getStats(chat);
       return sendMessage(env, chat,
         "👤 <b>حساب من</b>\n\n💎 اعتبار: " + toFa(s.amount) +
         "\n🔮 استخاره‌ها: " + toFa(s.total_estekhare) +
-        "\n🔓 باز شده: " + toFa(s.total_opens), mainKb);
+        "\n🔓 باز شده: " + toFa(s.total_opens), accountKb);
     } catch (e) { console.error("account error:", e); return sendMessage(env, chat, "⚠️ خطا در خواندن حساب.", mainKb); }
   }
 
@@ -620,6 +709,51 @@ async function onCallback(env, cq, allowedUsers) {
     if (data === "home") return sendMessage(env, chat, "🏠 منوی اصلی", mainKb);
     if (data === "new" || data === "cats") return sendMessage(env, chat, "📂 دستهٔ موردنظرت رو انتخاب کن:", catKb());
     if (data === "store") return sendMessage(env, chat, STORE_MSG, storeKb);
+
+    if (data === "account") {
+      const s = await stub.getStats(chat);
+      return sendMessage(env, chat,
+        "👤 <b>حساب من</b>\n\n💎 اعتبار: " + toFa(s.amount) +
+        "\n🔮 استخاره‌ها: " + toFa(s.total_estekhare) +
+        "\n🔓 باز شده: " + toFa(s.total_opens), accountKb);
+    }
+
+    // 🆕 نمایش تاریخچه
+    if (data === "history") {
+      const hist = await stub.getHistory(chat, HISTORY_LIMIT);
+      if (!hist.length) {
+        return sendMessage(env, chat,
+          "📜 <b>تاریخچه‌ی استخاره‌ها</b>\n\nهنوز استخاره‌ای ثبت نشده.\nاولین استخاره‌ات رو بگیر! 🌿",
+          { inline_keyboard: [[{ text: "🔮 استخاره", callback_data: "new" }], [{ text: "↩️ بازگشت", callback_data: "account" }]] });
+      }
+      return sendMessage(env, chat,
+        "📜 <b>تاریخچه‌ی استخاره‌ها</b>\n\nآخرین " + toFa(hist.length) + " استخاره‌ی تو.\nروی هرکدوم بزن تا دوباره ببینی‌اش:",
+        historyKb(hist));
+    }
+
+    // 🆕 پاک کردن تاریخچه
+    if (data === "hist_clear") {
+      await stub.clearHistory(chat);
+      return sendMessage(env, chat, "✅ تاریخچه‌ی استخاره‌ها پاک شد.", accountKb);
+    }
+
+    // 🆕 بازکردن یه مورد از تاریخچه
+    if (data.startsWith("hist_open:")) {
+      const id = parseInt(data.slice(10), 10);
+      if (isNaN(id)) return sendMessage(env, chat, "⚠️ خطای داده.", mainKb);
+      const item = await stub.getHistoryItem(chat, id);
+      if (!item) return sendMessage(env, chat, "⚠️ این مورد پیدا نشد.", mainKb);
+
+      const record = CONTENT.find(r => r.page === item.page);
+      if (!record) return sendMessage(env, chat, "⚠️ محتوای این صفحه موجود نیست.", mainKb);
+
+      // نمایش پیام رایگان + دکمه‌ی باز کردن تحلیل
+      const alreadyUnlocked = await stub.isUnlocked(chat, item.page, item.topic);
+      const kb = alreadyUnlocked
+        ? { inline_keyboard: [[{ text: "📖 مشاهدهٔ تحلیل تخصصی", callback_data: "view:" + item.topic }], [{ text: "↩️ بازگشت", callback_data: "history" }]] }
+        : { inline_keyboard: [[{ text: "💎 استخاره تخصصی " + topicShort(item.topic), callback_data: "unlock:" + item.topic }], [{ text: "↩️ بازگشت", callback_data: "history" }]] };
+      return sendMessage(env, chat, freeMsg(record, item.topic), kb);
+    }
 
     if (data.startsWith("cat:")) {
       const cat = CATEGORIES.find(c => c.id === data.slice(4));
@@ -644,7 +778,8 @@ async function onCallback(env, cq, allowedUsers) {
       if (!canDraw) return sendMessage(env, chat, RATE_LIMIT_MSG, ritualKb(t));
       const idx = pickIndex();
       const record = CONTENT[idx];
-      await stub.recordEstekhare(chat, t, record.page);
+      // 🆕 ذخیره با تمام اطلاعات لازم
+      await stub.recordEstekhare(chat, t, record.page, record.surah, record.ayah, record.level);
       await sendMessage(env, chat, "🔮 در حال انجام استخاره...");
       return sendMessage(env, chat, freeMsg(record, t), resultKb(t));
     }
@@ -710,8 +845,8 @@ export default {
         const duplicatedPages = Object.entries(pageCounts).filter(e => e[1] > 1).map(e => e[0] + " (×" + e[1] + ")");
 
         return new Response(JSON.stringify({
-          version: 22, schema: 5, doPrefix: DO_VERSION_PREFIX,
-          backupMode: "kv",
+          version: 23, schema: 5, doPrefix: DO_VERSION_PREFIX,
+          backupMode: "kv", historyLimit: HISTORY_LIMIT,
           hasToken: !!env.BOT_TOKEN, hasKV: !!env.USERS_KV, hasDO: !!env.CREDIT_MANAGER,
           hasAdminSecret: !!env.ADMIN_SECRET,
           records: CONTENT.length, expectedRecords: 302,
@@ -723,7 +858,6 @@ export default {
         }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
 
-      // ===== Backups: list =====
       if (url.pathname === "/backups") {
         if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
         const list = await listBackups(env);
@@ -732,7 +866,6 @@ export default {
         });
       }
 
-      // ===== Backups: download =====
       if (url.pathname === "/backup") {
         if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
         const backupKey = url.searchParams.get("key");
@@ -742,7 +875,6 @@ export default {
         return new Response(raw, { headers: { "Content-Type": "application/json" } });
       }
 
-      // ===== Backups: manual trigger =====
       if (url.pathname === "/backup-now") {
         if (!checkAdminSecret(env, url)) return new Response("Unauthorized", { status: 401 });
         const res = await performBackup(env);
@@ -752,7 +884,6 @@ export default {
       return new Response("ok");
     }
 
-    // ===== Backups: restore (POST) =====
     if (request.method === "POST") {
       const url = new URL(request.url);
 
@@ -776,7 +907,6 @@ export default {
         });
       }
 
-      // ===== webhook =====
       try {
         const u = await request.json();
         const allowedStr = env.ALLOWED_USERS || "";
@@ -793,7 +923,6 @@ export default {
     return new Response("ok");
   },
 
-  // ========== Cron Trigger ==========
   async scheduled(event, env, ctx) {
     console.log("[Cron] Triggered at", new Date().toISOString());
     ctx.waitUntil(performBackup(env));
