@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neshan Sampler v5 | نشان سمپل - Assembler (Schema v6.2)</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Tahoma,Vazirmatn,sans-serif}
+body{background:#0a1628;color:#e2e8f0;min-height:100vh;padding:10px}
+.container{max-width:900px;margin:0 auto}
+h1{font-size:1.1em;text-align:center;padding:14px;background:linear-gradient(135deg,#1e3a5f,#0d2137);border-radius:12px;margin-bottom:12px;border:1px solid #2d5a87}
+h2{font-size:1em;margin:12px 0 8px;color:#7dd3fc}
+.card{background:#111d33;border-radius:12px;padding:14px;margin-bottom:12px;border:1px solid #1e3a5f}
+.btn{display:inline-block;padding:11px 20px;border-radius:10px;border:none;cursor:pointer;font-size:.95em;font-family:inherit;margin:4px}
+.btn-primary{background:#2563eb;color:#fff}
+.btn-success{background:#16a34a;color:#fff}
+.btn-warning{background:#d97706;color:#fff}
+.btn-danger{background:#dc2626;color:#fff}
+.btn-copy{background:#7c3aed;color:#fff}
+.btn-info{background:#0891b2;color:#fff}
+textarea{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px solid #2d5a87;border-radius:8px;padding:11px;font-size:.88em;font-family:monospace;direction:ltr;text-align:left;min-height:200px;margin:6px 0}
+label{display:block;margin:7px 0 2px;color:#94a3b8;font-size:.88em}
+input[type="text"],input[type="number"]{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px solid #2d5a87;border-radius:8px;padding:9px;font-size:.92em;font-family:inherit;margin:3px 0}
+input[type="file"]{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px dashed #2d5a87;border-radius:8px;padding:9px;font-size:.85em;margin:3px 0;cursor:pointer}
+.output-code{background:#0a0f1a;color:#a5f3fc;padding:12px;border-radius:8px;font-family:monospace;font-size:.72em;white-space:pre-wrap;word-break:break-all;max-height:500px;overflow:auto;direction:ltr;text-align:left;min-height:200px}
+.status{padding:9px;border-radius:8px;margin:8px 0;font-size:.88em}
+.status.ok{background:#14532d;color:#86efac}
+.status.err{background:#7f1d1d;color:#fca5a5}
+.status.info{background:#1e3a5f;color:#93c5fd}
+.status.warn{background:#78350f;color:#fcd34d}
+.help-box{background:#1e293b;border-radius:8px;padding:11px;margin:7px 0;font-size:.83em;line-height:1.7;border-right:4px solid #d97706}
+.pages-list{background:#0d1b2f;border-radius:8px;padding:11px;margin:6px 0;font-size:.85em;max-height:200px;overflow:auto}
+.page-item{padding:5px 8px;margin:3px 0;background:#111d33;border-radius:6px;border-right:3px solid #16a34a}
+.page-item.err{border-right-color:#dc2626}
+.file-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin:6px 0}
+@media(max-width:600px){.file-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>📦 Neshan Sampler v5 | نشان سمپل — Assembler<br><small style="font-size:.6em;color:#64748b">Schema v6.2 — ۱۰ صفحه → یه فایل pXXX-XXX.js</small></h1>
+
+<div class="card"><h2>📥 ورودی — از دو راه</h2>
+
+<label>شماره‌ی اولین صفحه:</label>
+<input type="number" id="startPage" value="1" placeholder="مثلاً 1">
+
+<label>شماره‌ی آخرین صفحه:</label>
+<input type="number" id="endPage" value="19" placeholder="مثلاً 19">
+
+<label>نام متغیر JS:</label>
+<input type="text" id="varName" value="P001_019" placeholder="P001_019">
+
+<label>نام فایل خروجی:</label>
+<input type="text" id="fileName" value="p001-019.js" placeholder="p001-019.js">
+
+<label style="margin-top:14px">📁 یا انتخاب ۵ فایل txt (اختیاری):</label>
+<div class="file-grid">
+  <input type="file" id="file1" accept=".txt" onchange="loadFile(1)">
+  <input type="file" id="file2" accept=".txt" onchange="loadFile(2)">
+  <input type="file" id="file3" accept=".txt" onchange="loadFile(3)">
+  <input type="file" id="file4" accept=".txt" onchange="loadFile(4)">
+  <input type="file" id="file5" accept=".txt" onchange="loadFile(5)">
+</div>
+
+<label style="margin-top:14px">📄 یا متن کامل (هر تعداد بلوک کد، خودش تشخیص می‌ده):</label>
+<textarea id="inputText" placeholder="کل متن رو اینجا پیست کن — خودش بلوک‌ها رو تشخیص می‌ده"></textarea>
+
+<div style="text-align:center;margin-top:8px">
+<button class="btn btn-primary" onclick="processInput()">🔄 پردازش</button>
+<button class="btn btn-warning" onclick="clearAll()">🗑️ پاک کردن</button>
+</div>
+</div>
+
+<div id="statusBar"></div>
+
+<div class="card"><h2>👁️ پیش‌نمایش صفحه‌های شناسایی‌شده</h2>
+<div class="pages-list" id="pagesList">هیچ صفحه‌ای شناسایی نشد.</div>
+</div>
+
+<div class="card"><h2>📤 خروجی نهایی — فایل pXXX-XXX.js</h2>
+<div style="text-align:center">
+<button class="btn btn-success" onclick="downloadFile()">⬇️ دانلود فایل</button>
+<button class="btn btn-copy" onclick="copyOutput()">📋 کپی کل خروجی</button>
+</div>
+<div class="output-code" id="outputCode">// خروجی...</div>
+</div>
+
+<div class="card"><h2>❓ راهنما</h2>
+<div class="help-box">
+<b>📥 نحوه‌ی استفاده:</b> یا ۵ فایل txt رو از دکمه‌های بالا انتخاب کن، یا کل متن رو در textarea پیست کن.
+</div>
+<div class="help-box">
+<b>📄 Schema v6.2 — تغییرات نسبت به v4:</b>
+<ul style="margin-right:14px;margin-top:5px">
+<li><code>free.salutation</code> → <code>free.opening</code></li>
+<li><code>dua_text</code> حذف شد (در <code>DUA_BANK</code> index.js)</li>
+<li><code>wisdom</code> خودکار حذف می‌شه (defensive)</li>
+<li><code>topic_hook</code> اگه بود اضافه می‌شه (اختیاری)</li>
+<li>escape با <code>JSON.stringify</code> (امن‌تر)</li>
+</ul>
+</div>
+<div class="help-box" style="border-color:#ef4444">
+<b>⚠️ هشدار:</b> اگه بلوکی ناقص بود، در فایل نهایی با کامنتِ «⚠️ ناقص» نوشته می‌شه.
+</div>
+</div>
+
+</div>
+
+<script>
+let parsedPages = [];
+let finalOutput = '';
+
+// ═══════════════════════════════════════
+//  بارگذاری فایل‌ها
+// ═══════════════════════════════════════
+
+function loadFile(num) {
+  const fileInput = document.getElementById('file' + num);
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target.result;
+    const ta = document.getElementById('inputText');
+    const existing = ta.value.trim();
+    ta.value = existing ? (existing + '\n\n' + content) : content;
+    status('📁 فایل ' + num + ' بارگذاری شد', 'ok');
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function clearAll() {
+  document.getElementById('inputText').value = '';
+  for (let i = 1; i <= 5; i++) document.getElementById('file' + i).value = '';
+  document.getElementById('pagesList').innerHTML = 'هیچ صفحه‌ای شناسایی نشد.';
+  document.getElementById('outputCode').textContent = '// خروجی...';
+  document.getElementById('statusBar').innerHTML = '';
+  parsedPages = [];
+  finalOutput = '';
+}
+
+function status(m, t) {
+  document.getElementById('statusBar').innerHTML = m ? `<div class="status ${t}">${m}</div>` : '';
+}
+
+// ═══════════════════════════════════════
+//  پارس بلوک‌های آبجکت
+// ═══════════════════════════════════════
+
+function extractObjectBlocks(text) {
+  const blocks = [];
+  let i = 0;
+  const len = text.length;
+
+  while (i < len) {
+    while (i < len && text[i] !== '{') i++;
+    if (i >= len) break;
+
+    const start = i;
+    let depth = 0;
+    let inString = false;
+    let stringChar = '';
+    let escaped = false;
+    let j = i;
+
+    for (; j < len; j++) {
+      const c = text[j];
+      if (escaped) { escaped = false; continue; }
+      if (inString) {
+        if (c === '\\') { escaped = true; continue; }
+        if (c === stringChar) inString = false;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === '`') {
+        inString = true;
+        stringChar = c;
+        continue;
+      }
+      if (c === '{') depth++;
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) {
+          blocks.push(text.slice(start, j + 1));
+          i = j + 1;
+          break;
+        }
+      }
+    }
+    if (j >= len) break;
+  }
+  return blocks;
+}
+
+// ═══════════════════════════════════════
+//  اعتبارسنجی صفحه
+// ═══════════════════════════════════════
+
+function validatePage(obj) {
+  const w = [];
+  if (!obj.surah) w.push('surah خالی');
+  if (!obj.ayah) w.push('ayah خالی');
+  if (!obj.badge) w.push('badge خالی');
+
+  if (!obj.free) w.push('free نیس');
+  else {
+    const f = obj.free;
+    if (!f.result_short) w.push('result_short خالی');
+    if (!f.opening && !f.salutation) w.push('opening خالی');
+    if (!f.arabic) w.push('arabic خالی');
+    if (!f.translation) w.push('translation خالی');
+    if (!f.message) w.push('message خالی');
+    if (!f.cta) w.push('cta خالی');
+  }
+
+  if (!obj.topics) w.push('topics نیس');
+  else {
+    const keys = Object.keys(obj.topics);
+    if (keys.length < 9) w.push(keys.length + '/9 موضوع');
+
+    for (const k of keys) {
+      const t = obj.topics[k] || {};
+      if (!t.verdict) w.push(k + '.verdict');
+      if (!t.badge) w.push(k + '.badge');
+      if (!t.result_detail) w.push(k + '.result_detail');
+      if (!t.core_points || !t.core_points.length) w.push(k + '.core_points');
+      if (!t.tip) w.push(k + '.tip');
+      if (!t.warning) w.push(k + '.warning');
+      if (!t.actions || !t.actions.length) w.push(k + '.actions');
+      if (!t.summary) w.push(k + '.summary');
+      if (!t.dua_ref) w.push(k + '.dua_ref');
+    }
+  }
+  return w;
+}
+
+function processInput() {
+  const input = document.getElementById('inputText').value.trim();
+  if (!input) { status('متن ورودی خالیه.', 'err'); return; }
+
+  const blocks = extractObjectBlocks(input);
+  parsedPages = [];
+
+  for (const block of blocks) {
+    try {
+      const obj = (new Function('return ' + block))();
+      if (obj && typeof obj === 'object' && obj.page) {
+        parsedPages.push({ obj, raw: block, valid: true });
+      } else {
+        parsedPages.push({ obj: null, raw: block, valid: false, error: 'ساختار نامعتبر' });
+      }
+    } catch (e) {
+      parsedPages.push({ obj: null, raw: block, valid: false, error: e.message });
+    }
+  }
+
+  // مرتب‌سازی
+  parsedPages.sort((a, b) => (a.obj?.page || 0) - (b.obj?.page || 0));
+
+  // حذف تکراری‌ها بر اساس page
+  const seen = new Set();
+  parsedPages = parsedPages.filter(p => {
+    if (!p.valid) return true;
+    if (seen.has(p.obj.page)) return false;
+    seen.add(p.obj.page);
+    return true;
+  });
+
+  // اعتبارسنجی
+  let validCount = 0;
+  let warnCount = 0;
+  for (const p of parsedPages) {
+    if (!p.valid) continue;
+    p.warnings = validatePage(p.obj);
+    if (p.warnings.length === 0) validCount++;
+    else warnCount++;
+  }
+
+  renderPagesList();
+  const varName = document.getElementById('varName').value.trim() || 'PARSED';
+  finalOutput = buildJSFile(varName, parsedPages);
+  document.getElementById('outputCode').textContent = finalOutput;
+
+  status(`✅ ${parsedPages.length} بلوک پارس شد. ${validCount} کامل، ${warnCount} با اخطار.`, warnCount === 0 ? 'ok' : 'warn');
+}
+
+function renderPagesList() {
+  const container = document.getElementById('pagesList');
+  if (parsedPages.length === 0) {
+    container.innerHTML = 'هیچ صفحه‌ای شناسایی نشد.';
+    return;
+  }
+  container.innerHTML = parsedPages.map((p, i) => {
+    if (!p.valid) {
+      return `<div class="page-item err">⚠️ بلوک ${i + 1}: نامعتبر — ${p.error}</div>`;
+    }
+    const obj = p.obj;
+    const topicCount = Object.keys(obj.topics || {}).length;
+    const isOk = p.warnings && p.warnings.length === 0;
+    return `<div class="page-item ${isOk ? '' : 'err'}">
+      📄 صفحه ${obj.page} — ${obj.surah || '؟'} | آیه ${obj.ayah || '؟'} — ${topicCount}/9 موضوع
+      ${p.warnings && p.warnings.length ? ' ⚠️ ' + p.warnings.slice(0, 5).join(', ') + (p.warnings.length > 5 ? '...' : '') : ' ✅'}
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════
+//  ساخت فایل JS نهایی — Schema v6.2
+// ═══════════════════════════════════════
+
+const J = (s) => JSON.stringify(s || '');
+
+function buildJSFile(varName, pages) {
+  const fileName = document.getElementById('fileName').value || 'output.js';
+  let js = `// content/${fileName}\n`;
+  js += `// Auto-generated by Neshan Sampler v5 — Schema v6.2\n`;
+  js += `// ${pages.length} صفحه\n\n`;
+  js += `export const ${varName} = [\n`;
+
+  pages.forEach((p, i) => {
+    if (!p.valid) {
+      js += `\n  // ⚠️ بلوک ناقص — دستی اصلاح کن\n  // ${p.raw.slice(0, 100)}...\n`;
+      return;
+    }
+
+    const obj = p.obj;
+    js += `\n  // ── صفحه ${obj.page} (سوره ${obj.surah || '؟'}، آیه ${obj.ayah || '؟'}) ──\n`;
+    js += `  {\n`;
+    js += `    page: ${obj.page},\n`;
+    js += `    surah: ${J(obj.surah)},\n`;
+    js += `    ayah: ${obj.ayah || 0},\n`;
+    js += `    badge: ${J(obj.badge)},\n`;
+    js += `    free: {\n`;
+
+    const free = obj.free || {};
+    js += `      result_short: ${J(free.result_short)},\n`;
+    js += `      opening: ${J(free.opening || free.salutation || '')},\n`;
+    js += `      arabic: ${J(free.arabic)},\n`;
+    js += `      translation: ${J(free.translation)},\n`;
+    js += `      message: ${J(free.message)},\n`;
+    js += `      cta: ${J(free.cta)}\n`;
+    js += `    },\n`;
+    js += `    topics: {\n`;
+
+    const topicKeys = Object.keys(obj.topics || {});
+    topicKeys.forEach((k, ki) => {
+      const t = obj.topics[k] || {};
+      js += `      ${k}: {\n`;
+      js += `        verdict: ${J(t.verdict)},\n`;
+      js += `        badge: ${J(t.badge)},\n`;
+      js += `        result_detail: ${J(t.result_detail)},\n`;
+
+      // topic_hook اختیاری
+      if (t.topic_hook && String(t.topic_hook).trim()) {
+        js += `        topic_hook: ${J(t.topic_hook)},\n`;
+      }
+
+      js += `        core_points: ${JSON.stringify(t.core_points || [])},\n`;
+      js += `        tip: ${J(t.tip)},\n`;
+      js += `        warning: ${J(t.warning)},\n`;
+      js += `        actions: ${JSON.stringify(t.actions || [])},\n`;
+      js += `        summary: ${J(t.summary)},\n`;
+      js += `        dua_ref: ${J(t.dua_ref)}\n`;
+      // ⛔ wisdom و dua_text به‌عمد حذف می‌شوند
+      js += `      }${ki < topicKeys.length - 1 ? ',' : ''}\n`;
+    });
+
+    js += `    }\n`;
+    js += `  }${i < pages.length - 1 ? ',' : ''}\n`;
+  });
+
+  js += `\n];\n`;
+  return js;
+}
+
+function downloadFile() {
+  if (!finalOutput) { alert('اول پردازش کن'); return; }
+  const name = document.getElementById('fileName').value || 'output.js';
+  const blob = new Blob([finalOutput], { type: 'text/javascript;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+}
+
+function copyOutput() {
+  if (!finalOutput) { alert('اول پردازش کن'); return; }
+  navigator.clipboard.writeText(finalOutput);
+  status('📋 خروجی کپی شد', 'ok');
+}
+</script>
+</body>
+</html>​
