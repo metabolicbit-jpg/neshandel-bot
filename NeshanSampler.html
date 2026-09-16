@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Neshan Sampler v5 | نشان سمپل - Assembler (Schema v6.2)</title>
+<title>Neshan Sampler v5 | نشان سمپل — Assembler (Schema v6.2)</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:Tahoma,Vazirmatn,sans-serif}
 body{background:#0a1628;color:#e2e8f0;min-height:100vh;padding:10px}
@@ -18,10 +18,17 @@ h2{font-size:1em;margin:12px 0 8px;color:#7dd3fc}
 .btn-danger{background:#dc2626;color:#fff}
 .btn-copy{background:#7c3aed;color:#fff}
 .btn-info{background:#0891b2;color:#fff}
-textarea{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px solid #2d5a87;border-radius:8px;padding:11px;font-size:.88em;font-family:monospace;direction:ltr;text-align:left;min-height:200px;margin:6px 0}
+textarea{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px solid #2d5a87;border-radius:8px;padding:11px;font-size:.88em;font-family:monospace;direction:ltr;text-align:left;min-height:150px;margin:6px 0}
 label{display:block;margin:7px 0 2px;color:#94a3b8;font-size:.88em}
 input[type="text"],input[type="number"]{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px solid #2d5a87;border-radius:8px;padding:9px;font-size:.92em;font-family:inherit;margin:3px 0}
-input[type="file"]{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px dashed #2d5a87;border-radius:8px;padding:9px;font-size:.85em;margin:3px 0;cursor:pointer}
+.upload-zone{border:2px dashed #2d5a87;border-radius:12px;padding:26px;text-align:center;cursor:pointer;background:#0d1b2f;margin-bottom:8px}
+.upload-zone.dragover{border-color:#7dd3fc;background:#132a44}
+.upload-buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.file-item{background:#0d1b2f;padding:9px;border-radius:8px;margin:5px 0;display:flex;justify-content:space-between;align-items:center;font-size:.88em;border-right:3px solid #2563eb}
+.file-item .fname{flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.file-item .pgnum{background:#2563eb;color:#fff;padding:2px 8px;border-radius:6px;font-size:.78em;font-weight:bold}
+.file-item .remove{color:#ef4444;cursor:pointer;padding:4px;font-weight:bold}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .output-code{background:#0a0f1a;color:#a5f3fc;padding:12px;border-radius:8px;font-family:monospace;font-size:.72em;white-space:pre-wrap;word-break:break-all;max-height:500px;overflow:auto;direction:ltr;text-align:left;min-height:200px}
 .status{padding:9px;border-radius:8px;margin:8px 0;font-size:.88em}
 .status.ok{background:#14532d;color:#86efac}
@@ -29,74 +36,87 @@ input[type="file"]{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px dashed
 .status.info{background:#1e3a5f;color:#93c5fd}
 .status.warn{background:#78350f;color:#fcd34d}
 .help-box{background:#1e293b;border-radius:8px;padding:11px;margin:7px 0;font-size:.83em;line-height:1.7;border-right:4px solid #d97706}
-.pages-list{background:#0d1b2f;border-radius:8px;padding:11px;margin:6px 0;font-size:.85em;max-height:200px;overflow:auto}
+.pages-list{background:#0d1b2f;border-radius:8px;padding:11px;margin:6px 0;font-size:.85em;max-height:250px;overflow:auto}
 .page-item{padding:5px 8px;margin:3px 0;background:#111d33;border-radius:6px;border-right:3px solid #16a34a}
 .page-item.err{border-right-color:#dc2626}
-.file-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin:6px 0}
-@media(max-width:600px){.file-grid{grid-template-columns:repeat(2,1fr)}}
+.page-item.warn{border-right-color:#d97706}
+@media(max-width:600px){.grid2{grid-template-columns:1fr}.btn{width:100%;text-align:center}.upload-buttons{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="container">
-<h1>📦 Neshan Sampler v5 | نشان سمپل — Assembler<br><small style="font-size:.6em;color:#64748b">Schema v6.2 — ۱۰ صفحه → یه فایل pXXX-XXX.js</small></h1>
+<h1>📦 Neshan Sampler v5 | نشان سمپل — Assembler<br><small style="font-size:.6em;color:#64748b">Schema v6.2 — آپلود پوشه‌ای • مرتب‌سازی خودکار • نام‌گذاری خودکار</small></h1>
 
-<div class="card"><h2>📥 ورودی — از دو راه</h2>
+<!-- ═══════════ بخش ورودی ═══════════ -->
+<div class="card"><h2>📥 آپلود فایل‌های خام (۱۰ صفحه در ۵ فایل)</h2>
 
-<label>شماره‌ی اولین صفحه:</label>
-<input type="number" id="startPage" value="1" placeholder="مثلاً 1">
-
-<label>شماره‌ی آخرین صفحه:</label>
-<input type="number" id="endPage" value="19" placeholder="مثلاً 19">
-
-<label>نام متغیر JS:</label>
-<input type="text" id="varName" value="P001_019" placeholder="P001_019">
-
-<label>نام فایل خروجی:</label>
-<input type="text" id="fileName" value="p001-019.js" placeholder="p001-019.js">
-
-<label style="margin-top:14px">📁 یا انتخاب ۵ فایل txt (اختیاری):</label>
-<div class="file-grid">
-  <input type="file" id="file1" accept=".txt" onchange="loadFile(1)">
-  <input type="file" id="file2" accept=".txt" onchange="loadFile(2)">
-  <input type="file" id="file3" accept=".txt" onchange="loadFile(3)">
-  <input type="file" id="file4" accept=".txt" onchange="loadFile(4)">
-  <input type="file" id="file5" accept=".txt" onchange="loadFile(5)">
+<div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+  <div style="font-size:2em">📂</div>
+  <div>فایل‌های خام را اینجا بکشید یا کلیک کنید</div>
+  <div style="font-size:.78em;color:#64748b">فرمت .txt • می‌توانید چند فایل یا کل پوشه را یکجا وارد کنید</div>
 </div>
 
-<label style="margin-top:14px">📄 یا متن کامل (هر تعداد بلوک کد، خودش تشخیص می‌ده):</label>
-<textarea id="inputText" placeholder="کل متن رو اینجا پیست کن — خودش بلوک‌ها رو تشخیص می‌ده"></textarea>
+<div class="upload-buttons">
+  <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📄 انتخاب فایل‌ها</button>
+  <button class="btn btn-info" onclick="document.getElementById('folderInput').click()">📁 آپلود پوشه</button>
+</div>
 
-<div style="text-align:center;margin-top:8px">
-<button class="btn btn-primary" onclick="processInput()">🔄 پردازش</button>
-<button class="btn btn-warning" onclick="clearAll()">🗑️ پاک کردن</button>
+<input type="file" id="fileInput" multiple accept=".txt,.text,.md" style="display:none" onchange="handleFiles(this.files)">
+<input type="file" id="folderInput" webkitdirectory directory multiple style="display:none" onchange="handleFiles(this.files)">
+
+<div id="fileList"></div>
+
+<div style="margin-top:10px;text-align:center">
+  <button class="btn btn-warning" onclick="sortFiles()">🔢 مرتب‌سازی بر اساس صفحه</button>
+  <button class="btn btn-danger" onclick="clearAll()">🗑️ پاک کردن همه</button>
+</div>
+</div>
+
+<!-- ═══════════ بخش تنظیمات ═══════════ -->
+<div class="card"><h2>⚙️ تنظیمات (خودکار پر می‌شه)</h2>
+<div class="grid2">
+  <div><label>نام فایل خروجی:</label><input type="text" id="fileName" value="p001-019" placeholder="p001-019"></div>
+  <div><label>نام متغیر JS:</label><input type="text" id="varName" value="P001_019" placeholder="P001_019"></div>
+</div>
+<div style="margin-top:10px;text-align:center">
+  <button class="btn btn-primary" onclick="processInput()">🔄 پردازش و ساخت خروجی</button>
 </div>
 </div>
 
 <div id="statusBar"></div>
 
+<!-- ═══════════ بخش پیش‌نمایش ═══════════ -->
 <div class="card"><h2>👁️ پیش‌نمایش صفحه‌های شناسایی‌شده</h2>
 <div class="pages-list" id="pagesList">هیچ صفحه‌ای شناسایی نشد.</div>
 </div>
 
+<!-- ═══════════ بخش خروجی ═══════════ -->
 <div class="card"><h2>📤 خروجی نهایی — فایل pXXX-XXX.js</h2>
 <div style="text-align:center">
-<button class="btn btn-success" onclick="downloadFile()">⬇️ دانلود فایل</button>
-<button class="btn btn-copy" onclick="copyOutput()">📋 کپی کل خروجی</button>
+  <button class="btn btn-success" onclick="downloadFile()">⬇️ دانلود فایل</button>
+  <button class="btn btn-copy" onclick="copyOutput()">📋 کپی کل خروجی</button>
 </div>
 <div class="output-code" id="outputCode">// خروجی...</div>
 </div>
 
+<!-- ═══════════ راهنما ═══════════ -->
 <div class="card"><h2>❓ راهنما</h2>
 <div class="help-box">
-<b>📥 نحوه‌ی استفاده:</b> یا ۵ فایل txt رو از دکمه‌های بالا انتخاب کن، یا کل متن رو در textarea پیست کن.
+<b>📥 نحوه‌ی استفاده:</b> ۵ فایل txt (شامل ۱۰ بلوک کد DeepSeek) رو از دکمه‌های بالا انتخاب کن یا کل پوشه رو آپلود کن.
 </div>
 <div class="help-box">
-<b>📄 Schema v6.2 — تغییرات نسبت به v4:</b>
+<b>🔢 مرتب‌سازی خودکار:</b> فایل‌ها بر اساس شماره‌ی صفحه در نام‌شون (مثل «صفحه ۱-۳» یا «p001-003») صعودی مرتب می‌شن.
+</div>
+<div class="help-box">
+<b>⚙️ نام‌گذاری خودکار:</b> بعد از آپلود، فیلدهای نام فایل و نام متغیر خودکار بر اساس کوچک‌ترین و بزرگ‌ترین صفحه تنظیم می‌شن.
+</div>
+<div class="help-box">
+<b>📄 Schema v6.2 — ویژگی‌ها:</b>
 <ul style="margin-right:14px;margin-top:5px">
-<li><code>free.salutation</code> → <code>free.opening</code></li>
-<li><code>dua_text</code> حذف شد (در <code>DUA_BANK</code> index.js)</li>
-<li><code>wisdom</code> خودکار حذف می‌شه (defensive)</li>
-<li><code>topic_hook</code> اگه بود اضافه می‌شه (اختیاری)</li>
+<li><code>free.opening</code> به‌جای <code>salutation</code></li>
+<li><code>dua_ref</code> فقط (دعا در <code>DUA_BANK</code> index.js)</li>
+<li><code>wisdom</code> خودکار حذف می‌شه</li>
+<li><code>topic_hook</code> اختیاری (اگه بود اضافه می‌شه)</li>
 <li>escape با <code>JSON.stringify</code> (امن‌تر)</li>
 </ul>
 </div>
@@ -108,37 +128,160 @@ input[type="file"]{width:100%;background:#0d1b2f;color:#e2e8f0;border:1px dashed
 </div>
 
 <script>
-let parsedPages = [];
+// ═══════════════════════════════════════
+//  متغیرهای گلوبال
+// ═══════════════════════════════════════
+let uploadedFiles = [];    // { name, content, size }
+let parsedPages = [];       // { obj, raw, valid, warnings }
 let finalOutput = '';
 
 // ═══════════════════════════════════════
-//  بارگذاری فایل‌ها
+//  تبدیل اعداد فارسی/عربی به انگلیسی
 // ═══════════════════════════════════════
+function toEn(s) {
+  return String(s).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+                  .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+}
 
-function loadFile(num) {
-  const fileInput = document.getElementById('file' + num);
-  const file = fileInput.files[0];
-  if (!file) return;
+// ═══════════════════════════════════════
+//  استخراج شماره‌ی صفحه از نام فایل
+//  پشتیبانی: "صفحه 1-3", "p001-003", "1-3", "1"
+// ═══════════════════════════════════════
+function pagesFromName(name) {
+  const base = name.split('/').pop().split('\\').pop();
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const content = e.target.result;
-    const ta = document.getElementById('inputText');
-    const existing = ta.value.trim();
-    ta.value = existing ? (existing + '\n\n' + content) : content;
-    status('📁 فایل ' + num + ' بارگذاری شد', 'ok');
-  };
-  reader.readAsText(file, 'UTF-8');
+  // الگو ۱: صفحه X-Y
+  let m = base.match(/صفحه[\s_]*([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/);
+  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
+
+  // الگو ۲: pXXX-XXX
+  m = base.match(/p[\s_]*([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/i);
+  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
+
+  // الگو ۳: XXX-XXX
+  m = base.match(/([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/);
+  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
+
+  // الگو ۴: فقط یک عدد
+  m = base.match(/([۰-۹0-9]+)/);
+  if (m) return [Number(toEn(m[1])), Number(toEn(m[1]))];
+
+  return [0, 0];
+}
+
+// ═══════════════════════════════════════
+//  مرتب‌سازی فایل‌ها بر اساس کوچک‌ترین صفحه
+// ═══════════════════════════════════════
+function sortFiles() {
+  uploadedFiles.sort((a, b) => {
+    const [aMin] = pagesFromName(a.name);
+    const [bMin] = pagesFromName(b.name);
+    if (aMin === 0 && bMin === 0) return a.name.localeCompare(b.name);
+    if (aMin === 0) return 1;
+    if (bMin === 0) return -1;
+    return aMin - bMin;
+  });
+  renderFileList();
+}
+
+// ═══════════════════════════════════════
+//  به‌روزرسانی خودکار نام فایل و متغیر
+// ═══════════════════════════════════════
+function autoUpdateNames() {
+  if (!uploadedFiles.length) return;
+
+  let minP = Infinity, maxP = 0;
+  uploadedFiles.forEach(f => {
+    const [a, b] = pagesFromName(f.name);
+    if (a > 0) minP = Math.min(minP, a);
+    if (b > 0) maxP = Math.max(maxP, b);
+  });
+
+  if (minP === Infinity || maxP === 0) return;
+
+  const pad = n => String(n).padStart(3, '0');
+  document.getElementById('fileName').value = `p${pad(minP)}-${pad(maxP)}`;
+  document.getElementById('varName').value = `P${pad(minP)}_${pad(maxP)}`;
+}
+
+// ═══════════════════════════════════════
+//  مدیریت فایل‌های آپلودشده
+// ═══════════════════════════════════════
+function handleFiles(fl) {
+  const files = Array.from(fl).filter(f => /\.(txt|text|md)$/i.test(f.name));
+  if (!files.length) {
+    status('هیچ فایل .txt/.text/.md پیدا نشد.', 'err');
+    return;
+  }
+
+  let done = 0;
+  const total = files.length;
+
+  files.forEach(f => {
+    const r = new FileReader();
+    r.onload = e => {
+      uploadedFiles.push({
+        name: f.name,
+        content: e.target.result,
+        size: f.size
+      });
+      done++;
+      if (done === total) {
+        sortFiles();
+        autoUpdateNames();
+        status(`✅ ${total} فایل بارگذاری و مرتب شد.`, 'ok');
+      }
+    };
+    r.onerror = () => {
+      done++;
+      if (done === total) {
+        sortFiles();
+        autoUpdateNames();
+        status(`⚠️ ${total} فایل با خطاهای احتمالی بارگذاری شد.`, 'warn');
+      }
+    };
+    r.readAsText(f, 'UTF-8');
+  });
+}
+
+function renderFileList() {
+  const container = document.getElementById('fileList');
+  if (!uploadedFiles.length) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = uploadedFiles.map((f, i) => {
+    const [a, b] = pagesFromName(f.name);
+    const pgTxt = (a && b) ? (a === b ? `صفحه ${a}` : `صفحه ${a}-${b}`) : '؟';
+    const base = f.name.split('/').pop().split('\\').pop();
+    return `<div class="file-item">
+      <span class="fname">
+        <span class="pgnum">${pgTxt}</span>
+        <span>📄 ${base}</span>
+        <small style="color:#64748b">(${(f.size / 1024).toFixed(1)}KB)</small>
+      </span>
+      <span class="remove" onclick="removeFile(${i})">✖</span>
+    </div>`;
+  }).join('');
+}
+
+function removeFile(i) {
+  uploadedFiles.splice(i, 1);
+  renderFileList();
+  autoUpdateNames();
 }
 
 function clearAll() {
-  document.getElementById('inputText').value = '';
-  for (let i = 1; i <= 5; i++) document.getElementById('file' + i).value = '';
+  uploadedFiles = [];
+  parsedPages = [];
+  finalOutput = '';
+  document.getElementById('fileInput').value = '';
+  document.getElementById('folderInput').value = '';
+  document.getElementById('fileList').innerHTML = '';
   document.getElementById('pagesList').innerHTML = 'هیچ صفحه‌ای شناسایی نشد.';
   document.getElementById('outputCode').textContent = '// خروجی...';
   document.getElementById('statusBar').innerHTML = '';
-  parsedPages = [];
-  finalOutput = '';
 }
 
 function status(m, t) {
@@ -146,9 +289,20 @@ function status(m, t) {
 }
 
 // ═══════════════════════════════════════
-//  پارس بلوک‌های آبجکت
+//  Drag & Drop
 // ═══════════════════════════════════════
+const z = document.getElementById('uploadZone');
+z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('dragover'); });
+z.addEventListener('dragleave', () => z.classList.remove('dragover'));
+z.addEventListener('drop', e => {
+  e.preventDefault();
+  z.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
 
+// ═══════════════════════════════════════
+//  پارس بلوک‌های آبجکت (تعادل براکت)
+// ═══════════════════════════════════════
 function extractObjectBlocks(text) {
   const blocks = [];
   let i = 0;
@@ -194,9 +348,8 @@ function extractObjectBlocks(text) {
 }
 
 // ═══════════════════════════════════════
-//  اعتبارسنجی صفحه
+//  اعتبارسنجی صفحه (Schema v6.2)
 // ═══════════════════════════════════════
-
 function validatePage(obj) {
   const w = [];
   if (!obj.surah) w.push('surah خالی');
@@ -218,7 +371,6 @@ function validatePage(obj) {
   else {
     const keys = Object.keys(obj.topics);
     if (keys.length < 9) w.push(keys.length + '/9 موضوع');
-
     for (const k of keys) {
       const t = obj.topics[k] || {};
       if (!t.verdict) w.push(k + '.verdict');
@@ -235,30 +387,44 @@ function validatePage(obj) {
   return w;
 }
 
+// ═══════════════════════════════════════
+//  پردازش کل ورودی
+// ═══════════════════════════════════════
 function processInput() {
-  const input = document.getElementById('inputText').value.trim();
-  if (!input) { status('متن ورودی خالیه.', 'err'); return; }
+  if (!uploadedFiles.length) {
+    status('هیچ فایلی آپلود نشده.', 'err');
+    return;
+  }
 
-  const blocks = extractObjectBlocks(input);
+  // ترتیب فایل‌ها بر اساس صفحه
+  sortFiles();
+
   parsedPages = [];
 
-  for (const block of blocks) {
-    try {
-      const obj = (new Function('return ' + block))();
-      if (obj && typeof obj === 'object' && obj.page) {
-        parsedPages.push({ obj, raw: block, valid: true });
-      } else {
-        parsedPages.push({ obj: null, raw: block, valid: false, error: 'ساختار نامعتبر' });
+  // پردازش هر فایل به ترتیب
+  for (const f of uploadedFiles) {
+    const fp = pagesFromName(f.name);
+    const blocks = extractObjectBlocks(f.content);
+
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      try {
+        const obj = (new Function('return ' + block))();
+        if (obj && typeof obj === 'object' && obj.page) {
+          parsedPages.push({ obj, raw: block, valid: true, sourceFile: f.name });
+        } else {
+          parsedPages.push({ obj: null, raw: block, valid: false, error: 'ساختار نامعتبر', sourceFile: f.name });
+        }
+      } catch (e) {
+        parsedPages.push({ obj: null, raw: block, valid: false, error: e.message, sourceFile: f.name });
       }
-    } catch (e) {
-      parsedPages.push({ obj: null, raw: block, valid: false, error: e.message });
     }
   }
 
-  // مرتب‌سازی
+  // مرتب‌سازی بر اساس page
   parsedPages.sort((a, b) => (a.obj?.page || 0) - (b.obj?.page || 0));
 
-  // حذف تکراری‌ها بر اساس page
+  // حذف تکراری بر اساس page
   const seen = new Set();
   parsedPages = parsedPages.filter(p => {
     if (!p.valid) return true;
@@ -278,29 +444,33 @@ function processInput() {
   }
 
   renderPagesList();
+
   const varName = document.getElementById('varName').value.trim() || 'PARSED';
   finalOutput = buildJSFile(varName, parsedPages);
   document.getElementById('outputCode').textContent = finalOutput;
 
-  status(`✅ ${parsedPages.length} بلوک پارس شد. ${validCount} کامل، ${warnCount} با اخطار.`, warnCount === 0 ? 'ok' : 'warn');
+  status(`✅ ${parsedPages.length} بلوک پارس شد. ${validCount} کامل، ${warnCount} با اخطار.`,
+    warnCount === 0 && parsedPages.length === validCount ? 'ok' : 'warn');
 }
 
 function renderPagesList() {
   const container = document.getElementById('pagesList');
-  if (parsedPages.length === 0) {
+  if (!parsedPages.length) {
     container.innerHTML = 'هیچ صفحه‌ای شناسایی نشد.';
     return;
   }
+
   container.innerHTML = parsedPages.map((p, i) => {
     if (!p.valid) {
-      return `<div class="page-item err">⚠️ بلوک ${i + 1}: نامعتبر — ${p.error}</div>`;
+      return `<div class="page-item err">⚠️ بلوک ${i + 1} (${p.sourceFile}): نامعتبر — ${p.error}</div>`;
     }
     const obj = p.obj;
     const topicCount = Object.keys(obj.topics || {}).length;
     const isOk = p.warnings && p.warnings.length === 0;
-    return `<div class="page-item ${isOk ? '' : 'err'}">
+    const cls = isOk ? '' : (topicCount >= 9 ? 'warn' : 'err');
+    return `<div class="page-item ${cls}">
       📄 صفحه ${obj.page} — ${obj.surah || '؟'} | آیه ${obj.ayah || '؟'} — ${topicCount}/9 موضوع
-      ${p.warnings && p.warnings.length ? ' ⚠️ ' + p.warnings.slice(0, 5).join(', ') + (p.warnings.length > 5 ? '...' : '') : ' ✅'}
+      ${p.warnings && p.warnings.length ? ' ⚠️ ' + p.warnings.slice(0, 4).join(', ') + (p.warnings.length > 4 ? '...' : '') : ' ✅'}
     </div>`;
   }).join('');
 }
@@ -308,14 +478,13 @@ function renderPagesList() {
 // ═══════════════════════════════════════
 //  ساخت فایل JS نهایی — Schema v6.2
 // ═══════════════════════════════════════
-
 const J = (s) => JSON.stringify(s || '');
 
 function buildJSFile(varName, pages) {
-  const fileName = document.getElementById('fileName').value || 'output.js';
-  let js = `// content/${fileName}\n`;
+  const fileName = document.getElementById('fileName').value || 'output';
+  let js = `// content/${fileName}.js\n`;
   js += `// Auto-generated by Neshan Sampler v5 — Schema v6.2\n`;
-  js += `// ${pages.length} صفحه\n\n`;
+  js += `// ${pages.filter(p => p.valid).length} صفحه\n\n`;
   js += `export const ${varName} = [\n`;
 
   pages.forEach((p, i) => {
@@ -374,9 +543,15 @@ function buildJSFile(varName, pages) {
   return js;
 }
 
+// ═══════════════════════════════════════
+//  دانلود و کپی
+// ═══════════════════════════════════════
 function downloadFile() {
-  if (!finalOutput) { alert('اول پردازش کن'); return; }
-  const name = document.getElementById('fileName').value || 'output.js';
+  if (!finalOutput) {
+    alert('اول پردازش کن');
+    return;
+  }
+  const name = (document.getElementById('fileName').value || 'output') + '.js';
   const blob = new Blob([finalOutput], { type: 'text/javascript;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -385,10 +560,15 @@ function downloadFile() {
 }
 
 function copyOutput() {
-  if (!finalOutput) { alert('اول پردازش کن'); return; }
-  navigator.clipboard.writeText(finalOutput);
-  status('📋 خروجی کپی شد', 'ok');
+  if (!finalOutput) {
+    alert('اول پردازش کن');
+    return;
+  }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(finalOutput);
+    status('📋 خروجی کپی شد', 'ok');
+  }
 }
 </script>
 </body>
-</html>​
+</html>
