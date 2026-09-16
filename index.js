@@ -57,6 +57,60 @@ const PACKS = [
   { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",        text:"🥇 ۱۲۰ اعتبار — ۱۵۰,۰۰۰ تومان" },
 ];
 
+// ========== DUA_BANK (Schema v6.2) ==========
+const DUA_BANK = {
+  "marriage.main": {
+    text: "رَبَّنَا هَبْ لَنَا مِنْ أَزْوَاجِنَا وَذُرِّيَّاتِنَا قُرَّةَ أَعْيُنٍ وَاجْعَلْنَا لِلْمُتَّقِينَ إِمَامًا",
+    translation: "پروردگارا، از همسران و فرزندانمان مایه‌ی روشنی چشم به ما عطا کن و ما را پیشوای پرهیزگاران قرار ده.",
+    source: "فرقان ۷۴",
+  },
+  "trade.main": {
+    text: "اللَّهُمَّ إِنِّي أَسْأَلُكَ عِلْمًا نَافِعًا وَرِزْقًا طَيِّبًا وَعَمَلًا مُتَقَبَّلًا",
+    translation: "خدایا، از تو دانش سودمند، روزی پاک و کردار پذیرفته می‌خواهم.",
+    source: "حدیث",
+  },
+  "work.main": {
+    text: "رَبِّ إِنِّي لِمَا أَنزَلْتَ إِلَيَّ مِنْ خَيْرٍ فَقِيرٌ",
+    translation: "پروردگارا، من به هر خیری که بر من فرو فرستی نیازمندم.",
+    source: "قصص ۲۴",
+  },
+  "home.main": {
+    text: "رَبِّ أَنزِلْنِي مُنزَلًا مُّبَارَكًا وَأَنتَ خَيْرُ الْمُنزِلِينَ",
+    translation: "پروردگارا، مرا در جایگاهی پربرکت فرود آور که تو بهترین جای‌دهندگانی.",
+    source: "مؤمنون ۲۹",
+  },
+  "car.main": {
+    text: "بِسْمِ اللَّهِ الَّذِي لَا يَضُرُّ مَعَ اسْمِهِ شَيْءٌ فِي الْأَرْضِ وَلَا فِي السَّمَاءِ وَهُوَ السَّمِيعُ الْعَلِيمُ",
+    translation: "به نام خدایی که با نامش هیچ چیز در زمین و آسمان آسیب نمی‌رساند؛ و او شنوا و داناست.",
+    source: "حدیث",
+  },
+  "investment.main": {
+    text: "اللَّهُمَّ بَارِكْ لَنَا فِي أَمْوَالِنَا وَأَوْلَادِنَا وَاجْعَلْنَا مِنَ الشَّاكِرِينَ",
+    translation: "خدایا، در اموال و فرزندانمان برکت ده و ما را از سپاسگزاران قرار ده.",
+    source: "حدیث",
+  },
+  "loan.main": {
+    text: "اللَّهُمَّ اكْفِنِي بِحَلَالِكَ عَنْ حَرَامِكَ وَأَغْنِنِي بِفَضْلِكَ عَمَّن سِوَاكَ",
+    translation: "خدایا، مرا با حلال خود از حرام بی‌نیاز کن و با فضلت از غیر خودت بی‌نیاز ساز.",
+    source: "حدیث",
+  },
+  "study.main": {
+    text: "رَبِّ زِدْنِي عِلْمًا",
+    translation: "پروردگارا، بر دانش من بیفزا.",
+    source: "طه ۱۱۴",
+  },
+  "health.main": {
+    text: "وَإِذَا مَرِضْتُ فَهُوَ يَشْفِينِ",
+    translation: "و هنگامی که بیمار شدم، او مرا شفا می‌دهد.",
+    source: "شعراء ۸۰",
+  },
+};
+
+function getDua(duaRef) {
+  if (!duaRef) return null;
+  return DUA_BANK[duaRef] || null;
+}
+
 const DISCLAIMER = "⚖️ سلب مسئولیت و نکته مهم فقهی: فراموش نکنید که در احکام اسلامی، استخاره جایگزین عقل، تحقیق و مشورت نیست و «وحی منزل» محسوب نمی‌شود. این متن صرفاً یک تفسیر و راهنمای معنوی بر اساس آیات قرآن است. لذا برای تصمیمات حساس زندگی‌تان، حتماً در کنار این استخاره، با متخصصان و مشاوران کارآزمودهٔ آن حوزه مشورت فرمایید. 🤝";
 
 const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
@@ -279,7 +333,6 @@ export class CreditManager extends DurableObject {
     );
   }
 
-  // ===== Referral =====
   async hasBeenReferred(userId) {
     this._ensureSchema();
     const r = this._selectOne(`SELECT referred_id FROM referrals WHERE referred_id = ?`, userId);
@@ -310,7 +363,6 @@ export class CreditManager extends DurableObject {
     } catch (e) { return []; }
   }
 
-  // 🆕 ریست کامل DO
   async resetData() {
     this._ensureSchema();
     try { this._exec(`DELETE FROM credits`); } catch (e) {}
@@ -475,14 +527,32 @@ function renderAction(a) {
   return a || "";
 }
 
+function renderCorePoints(cp) {
+  if (!Array.isArray(cp) || cp.length === 0) return "";
+  return cp.map(c => "• " + c).join("\n");
+}
+
 function topicBlockV5(r, t) {
   const k = topicKey(t);
   const T = (r.topics || {})[k] || (r.topics || {})[ALIAS[t]];
   if (T) return T;
-  return { verdict: r.level || r.verdict || "میانه", badge: r.badge || "⚖️",
+  return {
+    verdict: r.level || r.verdict || "میانه",
+    badge: r.badge || "⚖️",
+    result_detail: "",
+    core_points: [],
     tip: r.core_message || "",
     warning: "این موضوع به‌صورت اختصاصی برای این صفحه تفسیر نشده؛ با احتیاط و مشورت پیش برو.",
-    action: ["💪 به پیام محوری آیه توجه کن و با بررسی دقیق تصمیم بگیر.", "🤝 با یک فرد خبره یا مشاور کارآزموده مشورت کن.", "🤲 صدقه بده و با توکل بر خدا اقدام کن."] };
+    actions: [
+      "💪 به پیام محوری آیه توجه کن و با بررسی دقیق تصمیم بگیر.",
+      "🤝 با یک فرد خبره یا مشاور کارآزموده مشورت کن.",
+      "🤲 صدقه بده و با توکل بر خدا اقدام کن.",
+      "📿 دعای موضوع — متن کامل در بخش «📿 ادعیه و اذکار».",
+    ],
+    summary: r.final_summary || "",
+    dua_ref: null,
+    topic_hook: null,
+  };
 }
 
 // ========== 5. ADMIN HELPERS ==========
@@ -655,6 +725,9 @@ function referralKb(link) {
 
 // ========== 7. MESSAGE BUILDERS ==========
 function freeMsg(r, t) {
+  const f = r.free || {};
+  const opening = f.opening || f.salutation || "";
+
   if (r.free_summary) {
     return [
       (r.intro || "سلام رفیق عزیزم! 🌿"), "",
@@ -666,29 +739,96 @@ function freeMsg(r, t) {
       (r.cta_free || r.cta || ""),
     ].join("\n");
   }
-  const B = topicBlockV5(r, t);
+
   return [
-    r.badge + " <b>نتیجه:</b> " + r.verdict,
-    "<b>" + (r.headline || "") + "</b>", "",
-    "📖 سوره " + r.surah + " — آیهٔ " + toFa(r.ayah) + " (صفحهٔ " + toFa(r.page) + ")",
-    r.arabic, "", "📜 " + r.translation, "",
-    (r.opener || ""), (r.plain || ""), "", (r.cta_free || ""),
+    (r.badge || "") + " نتیجه استخاره: " + (f.result_short || r.verdict || ""),
+    "",
+    opening,
+    "",
+    "📖 " + (f.arabic || ""),
+    "",
+    "🌐 " + (f.translation || ""),
+    "",
+    (f.message || ""),
+    "",
+    "📍 سوره " + r.surah + " | آیه " + toFa(r.ayah) + " (صفحه " + toFa(r.page) + ")",
+    "",
+    (f.cta || ""),
   ].join("\n");
 }
 
 function premiumMsg(r, t) {
   const B = topicBlockV5(r, t);
   const L = topicInfo(t).label;
-  return [
+  const dua = getDua(B.dua_ref);
+
+  const parts = [
     "💎 استخاره تخصصی | " + L,
-    "نتیجه: " + B.verdict + " " + B.badge, "",
-    "💎 پیام محوری و منطوق آیه:", r.core_message || "", "",
-    "💡 نکته و رمز آیه:", B.tip || "", "",
-    "⚠️ زنگ خطر / هشدار:", B.warning || "", "",
-    "🛠 راهکار عملیاتی:", renderAction(B.action), "",
-    "🌟 جمع‌بندی نهایی استخاره صفحه " + toFa(r.page) + ":", (r.final_summary || ""), "",
-    (r.cta_dua || ""), "", DISCLAIMER,
-  ].join("\n");
+    "📊 نتیجه: " + (B.verdict || "") + " " + (B.badge || ""),
+    "",
+  ];
+
+  if (B.topic_hook && String(B.topic_hook).trim()) {
+    parts.push("✨ " + B.topic_hook);
+    parts.push("");
+  }
+
+  parts.push("━━━━━━━━━━━━━━━━━━━━━");
+  parts.push("");
+
+  const coreStr = renderCorePoints(B.core_points);
+  if (coreStr) {
+    parts.push("💎 پیام محوری و منطوق آیه:");
+    parts.push(coreStr);
+    parts.push("");
+  }
+
+  if (B.tip) {
+    parts.push("💡 نکته و رمز آیه:");
+    parts.push(B.tip);
+    parts.push("");
+  }
+
+  if (B.warning) {
+    parts.push("⚠️ زنگ خطر / هشدار:");
+    parts.push(B.warning);
+    parts.push("");
+  }
+
+  if (B.actions && B.actions.length) {
+    parts.push("🛠 راهکار عملیاتی:");
+    parts.push(renderAction(B.actions));
+    parts.push("");
+  }
+
+  if (B.summary) {
+    parts.push("🌟 جمع‌بندی نهایی استخاره صفحه " + toFa(r.page) + ":");
+    parts.push(B.summary);
+    parts.push("");
+  }
+
+  if (dua) {
+    parts.push("━━━━━━━━━━━━━━━━━━━━━");
+    parts.push("");
+    parts.push("📿 دعای مرتبط با " + L + ":");
+    parts.push("");
+    parts.push("«" + dua.text + "»");
+    parts.push("");
+    parts.push("🌐 ترجمه: " + dua.translation);
+    parts.push("");
+    if (dua.source) {
+      parts.push("📚 منبع: " + dua.source);
+      parts.push("");
+    }
+    parts.push("💡 برای دعاهای بیشتر، بخش «📿 ادعیه و اذکار» را ببین.");
+    parts.push("");
+  }
+
+  parts.push("━━━━━━━━━━━━━━━━━━━━━");
+  parts.push("");
+  parts.push(DISCLAIMER);
+
+  return parts.join("\n");
 }
 
 // ========== 8. HANDLERS ==========
@@ -699,7 +839,6 @@ async function onMessage(env, m, allowedUsers) {
   const stub = getStub(env, chat);
   const isAdmin = isUserAdmin(env, chat);
 
-  // debug log
   if (text.startsWith("/start")) {
     try {
       await env.USERS_KV.put("debug:last-start:" + chat, JSON.stringify({
@@ -722,7 +861,6 @@ async function onMessage(env, m, allowedUsers) {
     }
   }
 
-  // 🆕 /resetme — ریست DO کاربر جاری (برای تست)
   if (text === "/resetme") {
     try {
       await stub.resetData();
@@ -738,7 +876,6 @@ async function onMessage(env, m, allowedUsers) {
     }
   }
 
-  // 🆕 /resetuser <chatId> — ادمین هر کاربر رو ریست کنه
   const resetMatch = text.match(/^\/resetuser\s+(\d+)$/);
   if (resetMatch) {
     if (!isAdmin) return sendMessage(env, chat, ADMIN_ONLY_MSG, mainKb);
@@ -1104,12 +1241,13 @@ export default {
         const botUsername = await getBotUsername(env);
 
         return new Response(JSON.stringify({
-          version: 27, schema: 5, doPrefix: DO_VERSION_PREFIX,
+          version: 28, schema: "v6.2", doPrefix: DO_VERSION_PREFIX,
           botUsername: botUsername || "(unknown)",
           backupMode: "kv", historyLimit: HISTORY_LIMIT,
           referral: { referrerReward: REFERRAL_REWARD_REFERRER, newUserReward: REFERRAL_REWARD_NEW_USER },
           hasToken: !!env.BOT_TOKEN, hasKV: !!env.USERS_KV, hasDO: !!env.CREDIT_MANAGER,
           hasAdminSecret: !!env.ADMIN_SECRET,
+          duaBankCount: Object.keys(DUA_BANK).length,
           records: CONTENT.length, expectedRecords: 302,
           missingCount: missingPages.length, missingPages, duplicatedPages,
           wallet: (env.WALLET_TOKEN || "").startsWith("WALLET-TEST") ? "test" : "real",
@@ -1214,4 +1352,4 @@ export default {
     console.log("[Cron] Triggered at", new Date().toISOString());
     ctx.waitUntil(performBackup(env));
   },
-};
+};​
