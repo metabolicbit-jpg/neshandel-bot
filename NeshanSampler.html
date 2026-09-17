@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Neshan Sampler v5 | نشان سمپل — Assembler (Schema v6.2)</title>
+<title>Neshan Sampler v5.3 | نشان سمپل — Assembler (JSON + Markdown)</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:Tahoma,Vazirmatn,sans-serif}
 body{background:#0a1628;color:#e2e8f0;min-height:100vh;padding:10px}
@@ -27,6 +27,7 @@ input[type="text"],input[type="number"]{width:100%;background:#0d1b2f;color:#e2e
 .file-item{background:#0d1b2f;padding:9px;border-radius:8px;margin:5px 0;display:flex;justify-content:space-between;align-items:center;font-size:.88em;border-right:3px solid #2563eb}
 .file-item .fname{flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .file-item .pgnum{background:#2563eb;color:#fff;padding:2px 8px;border-radius:6px;font-size:.78em;font-weight:bold}
+.file-item .badge-type{background:#7c3aed;color:#fff;padding:2px 6px;border-radius:6px;font-size:.7em}
 .file-item .remove{color:#ef4444;cursor:pointer;padding:4px;font-weight:bold}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .output-code{background:#0a0f1a;color:#a5f3fc;padding:12px;border-radius:8px;font-family:monospace;font-size:.72em;white-space:pre-wrap;word-break:break-all;max-height:500px;overflow:auto;direction:ltr;text-align:left;min-height:200px}
@@ -45,133 +46,363 @@ input[type="text"],input[type="number"]{width:100%;background:#0d1b2f;color:#e2e
 </head>
 <body>
 <div class="container">
-<h1>📦 Neshan Sampler v5 | نشان سمپل — Assembler<br><small style="font-size:.6em;color:#64748b">Schema v6.2 — آپلود پوشه‌ای • مرتب‌سازی خودکار • نام‌گذاری خودکار</small></h1>
+<h1>📦 Neshan Sampler v5.3 | نشان سمپل<br><small style="font-size:.6em;color:#64748b">JSON (v6.2) + Markdown (v5) • ترمیم خودکار کاماهای جاافتاده</small></h1>
 
-<!-- ═══════════ بخش ورودی ═══════════ -->
-<div class="card"><h2>📥 آپلود فایل‌های خام (۱۰ صفحه در ۵ فایل)</h2>
-
+<div class="card"><h2>📥 آپلود فایل‌های خام</h2>
 <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-  <div style="font-size:2em">📂</div>
-  <div>فایل‌های خام را اینجا بکشید یا کلیک کنید</div>
-  <div style="font-size:.78em;color:#64748b">فرمت .txt • می‌توانید چند فایل یا کل پوشه را یکجا وارد کنید</div>
+<div style="font-size:2em">📂</div>
+<div>فایل‌های خام را اینجا بکشید یا کلیک کنید</div>
+<div style="font-size:.78em;color:#64748b">فرمت .txt • JSON (v6.2) و Markdown (v5) هر دو پشتیبانی می‌شوند</div>
 </div>
-
 <div class="upload-buttons">
-  <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📄 انتخاب فایل‌ها</button>
-  <button class="btn btn-info" onclick="document.getElementById('folderInput').click()">📁 آپلود پوشه</button>
+<button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📄 انتخاب فایل‌ها</button>
+<button class="btn btn-info" onclick="document.getElementById('folderInput').click()">📁 آپلود پوشه</button>
 </div>
-
 <input type="file" id="fileInput" multiple accept=".txt,.text,.md" style="display:none" onchange="handleFiles(this.files)">
 <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none" onchange="handleFiles(this.files)">
-
 <div id="fileList"></div>
-
 <div style="margin-top:10px;text-align:center">
-  <button class="btn btn-warning" onclick="sortFiles()">🔢 مرتب‌سازی بر اساس صفحه</button>
-  <button class="btn btn-danger" onclick="clearAll()">🗑️ پاک کردن همه</button>
+<button class="btn btn-warning" onclick="sortFiles()">🔢 مرتب‌سازی بر اساس صفحه</button>
+<button class="btn btn-danger" onclick="clearAll()">🗑️ پاک کردن همه</button>
 </div>
 </div>
 
-<!-- ═══════════ بخش تنظیمات ═══════════ -->
-<div class="card"><h2>⚙️ تنظیمات (خودکار پر می‌شه)</h2>
+<div class="card"><h2>⚙️ تنظیمات</h2>
 <div class="grid2">
-  <div><label>نام فایل خروجی:</label><input type="text" id="fileName" value="p001-019" placeholder="p001-019"></div>
-  <div><label>نام متغیر JS:</label><input type="text" id="varName" value="P001_019" placeholder="P001_019"></div>
+<div><label>نام فایل خروجی:</label><input type="text" id="fileName" value="p001-019"></div>
+<div><label>نام متغیر JS:</label><input type="text" id="varName" value="P001_019"></div>
 </div>
 <div style="margin-top:10px;text-align:center">
-  <button class="btn btn-primary" onclick="processInput()">🔄 پردازش و ساخت خروجی</button>
+<button class="btn btn-primary" onclick="processInput()">🔄 پردازش و ساخت خروجی</button>
 </div>
 </div>
 
 <div id="statusBar"></div>
 
-<!-- ═══════════ بخش پیش‌نمایش ═══════════ -->
 <div class="card"><h2>👁️ پیش‌نمایش صفحه‌های شناسایی‌شده</h2>
 <div class="pages-list" id="pagesList">هیچ صفحه‌ای شناسایی نشد.</div>
 </div>
 
-<!-- ═══════════ بخش خروجی ═══════════ -->
 <div class="card"><h2>📤 خروجی نهایی — فایل pXXX-XXX.js</h2>
 <div style="text-align:center">
-  <button class="btn btn-success" onclick="downloadFile()">⬇️ دانلود فایل</button>
-  <button class="btn btn-copy" onclick="copyOutput()">📋 کپی کل خروجی</button>
+<button class="btn btn-success" onclick="downloadFile()">⬇️ دانلود فایل</button>
+<button class="btn btn-copy" onclick="copyOutput()">📋 کپی کل خروجی</button>
 </div>
 <div class="output-code" id="outputCode">// خروجی...</div>
 </div>
 
-<!-- ═══════════ راهنما ═══════════ -->
 <div class="card"><h2>❓ راهنما</h2>
-<div class="help-box">
-<b>📥 نحوه‌ی استفاده:</b> ۵ فایل txt (شامل ۱۰ بلوک کد DeepSeek) رو از دکمه‌های بالا انتخاب کن یا کل پوشه رو آپلود کن.
-</div>
-<div class="help-box">
-<b>🔢 مرتب‌سازی خودکار:</b> فایل‌ها بر اساس شماره‌ی صفحه در نام‌شون (مثل «صفحه ۱-۳» یا «p001-003») صعودی مرتب می‌شن.
-</div>
-<div class="help-box">
-<b>⚙️ نام‌گذاری خودکار:</b> بعد از آپلود، فیلدهای نام فایل و نام متغیر خودکار بر اساس کوچک‌ترین و بزرگ‌ترین صفحه تنظیم می‌شن.
-</div>
-<div class="help-box">
-<b>📄 Schema v6.2 — ویژگی‌ها:</b>
-<ul style="margin-right:14px;margin-top:5px">
-<li><code>free.opening</code> به‌جای <code>salutation</code></li>
-<li><code>dua_ref</code> فقط (دعا در <code>DUA_BANK</code> index.js)</li>
-<li><code>wisdom</code> خودکار حذف می‌شه</li>
-<li><code>topic_hook</code> اختیاری (اگه بود اضافه می‌شه)</li>
-<li>escape با <code>JSON.stringify</code> (امن‌تر)</li>
-</ul>
-</div>
-<div class="help-box" style="border-color:#ef4444">
-<b>⚠️ هشدار:</b> اگه بلوکی ناقص بود، در فایل نهایی با کامنتِ «⚠️ ناقص» نوشته می‌شه.
-</div>
+<div class="help-box"><b>📥 پشتیبانی:</b> JSON (Schema v6.2) و Markdown (Schema v5).</div>
+<div class="help-box"><b>🔄 تبدیل خودکار:</b> Markdown به Schema v6.2.</div>
+<div class="help-box" style="border-color:#7c3aed"><b>🛠️ ترمیم خودکار (v5.3):</b> کاماهای جاافتاده، کامنت‌ها، و خطاهای سینتکسی رایج خودکار اصلاح می‌شوند.</div>
 </div>
 
 </div>
 
 <script>
 // ═══════════════════════════════════════
-//  متغیرهای گلوبال
+//  CONSTANTS
 // ═══════════════════════════════════════
-let uploadedFiles = [];    // { name, content, size }
-let parsedPages = [];       // { obj, raw, valid, warnings }
+const TOPIC_KEYS = {
+  'ازدواج':'marriage','خواستگاری':'proposal','فرزندآوری':'childbirth',
+  'طلاق':'divorce','جدایی':'divorce','فسخ':'breakup','آشتی':'reconcile','مصالحه':'reconcile',
+  'کار':'work','استخدام':'work','معامله':'trade','شراکت':'investment',
+  'سرمایه‌گذاری':'investment','سرمایه گذاری':'investment','استعفا':'work','ترک شغل':'work',
+  'کسب شخصی':'work','راه‌اندازی کسب شخصی':'work','حقوقی':'trade','دادگاه':'trade',
+  'وام':'loan','قرض':'loan','خانه':'home','مسکن':'home','خودرو':'car',
+  'ضمانت':'investment','سفر':'travel','مهاجرت':'migration','جابجایی':'moving',
+  'نقل‌مکان':'moving','تحصیل':'study','کنکور':'study','سلامت':'health',
+  'سلامتی':'health','درمان':'health'
+};
+
+const NAME_VARIANTS = {
+  marriage:['ازدواج'], proposal:['خواستگاری'], childbirth:['فرزندآوری'],
+  divorce:['طلاق','جدایی'], breakup:['فسخ'], reconcile:['آشتی','مصالحه'],
+  work:['کار و استخدام','کار'], trade:['معامله و خرید و فروش','معامله'],
+  investment:['سرمایه‌گذاری','سرمایه گذاری','شراکت'],
+  loan:['وام و قرض','وام','قرض'], home:['خانه','مسکن'], car:['خودرو'],
+  travel:['سفر'], migration:['مهاجرت'], moving:['نقل‌مکان و جابجایی','نقل‌مکان','جابجایی'],
+  study:['تحصیل، کنکور','تحصیل','کنکور'], health:['سلامتی و درمان','سلامتی','سلامت','درمان']
+};
+
+const ALL_KEYS = ['marriage','trade','work','home','car','investment','loan','study','health'];
+
+const DUA_REF_MAP = {
+  marriage:'marriage.main', trade:'trade.main', work:'work.main',
+  home:'home.main', car:'car.main', investment:'investment.main',
+  loan:'loan.main', study:'study.main', health:'health.main'
+};
+
+const STOP_HEAD = ['🔹','🌟 جمع‌بندی','🗂️','🕌 استخاره'];
+const STOP_TIP = ['⚠️','🛠','🗂️','🌟 جمع','زنگ خطر','نکته و رمز آیه'];
+const STOP_WARN = ['🛠','🔹','🗂️','🌟 جمع','راهکار عملیاتی'];
+const STOP_ACT = ['🔹','🗂️','🌟 جمع'];
+const LBL_TIP = /(?:💡\s*)?نکته و رمز آیه\s*[:：]?\s*/;
+const LBL_WARN = /(?:⚠️?\s*)?زنگ خطر\s*(?:\/\s*هشدار)?\s*[:：]?\s*/;
+const LBL_ACT = /(?:🛠?\s*)?راهکار عملیاتی\s*[:：]?\s*/;
+const WARN_HINT = /خطر\s*اصلی|خطر\s*دوم|خطر\s*سوم|هشدار|احتیاط|مواظب|مراقب|بپرهیز|نگران/;
+
+const FA_WORDS = [' است ',' که ',' می ',' را ',' از ',' به ',' این ',' هر ',' خدا ',' تو ',' من ',' او ',' ما ',' شما ',' آنان ',' یعنی'];
+const EMO = /((?:[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]\s*)+)$/u;
+
+// ═══════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════
+let uploadedFiles = [];
+let parsedPages = [];
 let finalOutput = '';
 
 // ═══════════════════════════════════════
-//  تبدیل اعداد فارسی/عربی به انگلیسی
+//  HELPERS
 // ═══════════════════════════════════════
 function toEn(s) {
   return String(s).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
                   .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
 }
-
-// ═══════════════════════════════════════
-//  استخراج شماره‌ی صفحه از نام فایل
-//  پشتیبانی: "صفحه 1-3", "p001-003", "1-3", "1"
-// ═══════════════════════════════════════
-function pagesFromName(name) {
-  const base = name.split('/').pop().split('\\').pop();
-
-  // الگو ۱: صفحه X-Y
-  let m = base.match(/صفحه[\s_]*([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/);
-  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
-
-  // الگو ۲: pXXX-XXX
-  m = base.match(/p[\s_]*([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/i);
-  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
-
-  // الگو ۳: XXX-XXX
-  m = base.match(/([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/);
-  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
-
-  // الگو ۴: فقط یک عدد
-  m = base.match(/([۰-۹0-9]+)/);
-  if (m) return [Number(toEn(m[1])), Number(toEn(m[1]))];
-
-  return [0, 0];
+function status(m, t) {
+  document.getElementById('statusBar').innerHTML = m ? `<div class="status ${t}">${m}</div>` : '';
+}
+function badgeOf(l) {
+  const m = (l || '').match(EMO);
+  return m ? m[1].trim() : '';
+}
+function stripBadge(l) {
+  const m = (l || '').match(EMO);
+  return m ? l.slice(0, m.index).trim() : (l || '').trim();
+}
+function topicKeyOf(name) {
+  name = String(name).replace(/^[^\u0600-\u06FF]+/, '').trim();
+  if (TOPIC_KEYS[name]) return TOPIC_KEYS[name];
+  for (const k in TOPIC_KEYS) {
+    if (name.includes(k) || k.includes(name)) return TOPIC_KEYS[k];
+  }
+  return null;
+}
+function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function harakat(s) { return (s.match(/[\u064B-\u0652\u0670\u06D6-\u06ED]/g) || []).length; }
+function isArabicRun(s) {
+  return s.length >= 10 && harakat(s) >= 2 && !/[پچژگ]/.test(s) && !FA_WORDS.some(w => s.includes(w));
+}
+function idxOf(s, arr, from) {
+  let best = -1;
+  for (const c of arr) {
+    if (!c) continue;
+    const i = s.indexOf(c, from);
+    if (i > -1 && (best === -1 || i < best)) best = i;
+  }
+  return best === -1 ? s.length : best;
 }
 
 // ═══════════════════════════════════════
-//  مرتب‌سازی فایل‌ها بر اساس کوچک‌ترین صفحه
+//  🆕 STRIP COMMENTS (v5.3)
 // ═══════════════════════════════════════
+function stripComments(text) {
+  let out = '';
+  let i = 0;
+  const len = text.length;
+  let inStr = false, strChar = '', escaped = false;
+
+  while (i < len) {
+    const c = text[i];
+
+    if (escaped) { out += c; escaped = false; i++; continue; }
+
+    if (inStr) {
+      if (c === '\\') { out += c; escaped = true; i++; continue; }
+      if (c === strChar) inStr = false;
+      out += c; i++;
+      continue;
+    }
+
+    if (c === '"' || c === "'" || c === '`') {
+      inStr = true; strChar = c;
+      out += c; i++;
+      continue;
+    }
+
+    // کامنت خطی
+    if (c === '/' && i + 1 < len && text[i + 1] === '/') {
+      while (i < len && text[i] !== '\n' && text[i] !== '\r') i++;
+      continue;
+    }
+
+    // کامنت بلوکی
+    if (c === '/' && i + 1 < len && text[i + 1] === '*') {
+      i += 2;
+      while (i + 1 < len && !(text[i] === '*' && text[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+
+    out += c;
+    i++;
+  }
+
+  return out;
+}
+
+// ═══════════════════════════════════════
+//  🆕 FIX MISSING COMMAS (v5.3)
+//  ترمیم کاماهای جاافتاده بین }/] و کلید بعدی
+//  با احترام کامل به رشته‌ها
+// ═══════════════════════════════════════
+function fixMissingCommas(text) {
+  const out = [];
+  let i = 0;
+  const len = text.length;
+  let inStr = false, strChar = '', escaped = false;
+  let lastMeaningful = ''; // آخرین کاراکتر معنادار (نه فضای خالی)
+  let lastWasClosingBrace = false;
+
+  while (i < len) {
+    const c = text[i];
+
+    // escaped char
+    if (escaped) {
+      out.push(c);
+      lastMeaningful = c;
+      lastWasClosingBrace = false;
+      escaped = false;
+      i++;
+      continue;
+    }
+
+    // inside string
+    if (inStr) {
+      if (c === '\\') { out.push(c); escaped = true; i++; continue; }
+      if (c === strChar) inStr = false;
+      out.push(c);
+      i++;
+      continue;
+    }
+
+    // start of string
+    if (c === '"' || c === "'" || c === '`') {
+      inStr = true;
+      strChar = c;
+      out.push(c);
+      lastMeaningful = c;
+      lastWasClosingBrace = false;
+      i++;
+      continue;
+    }
+
+    // whitespace - just push
+    if (/\s/.test(c)) {
+      out.push(c);
+      i++;
+      continue;
+    }
+
+    // closing brace/bracket
+    if (c === '}' || c === ']') {
+      out.push(c);
+      lastMeaningful = c;
+      lastWasClosingBrace = true;
+      i++;
+      continue;
+    }
+
+    // comma
+    if (c === ',') {
+      out.push(c);
+      lastMeaningful = c;
+      lastWasClosingBrace = false;
+      i++;
+      continue;
+    }
+
+    // colon
+    if (c === ':') {
+      out.push(c);
+      lastMeaningful = c;
+      lastWasClosingBrace = false;
+      i++;
+      continue;
+    }
+
+    // opening brace/bracket
+    if (c === '{' || c === '[') {
+      out.push(c);
+      lastMeaningful = c;
+      lastWasClosingBrace = false;
+      i++;
+      continue;
+    }
+
+    // 🆕 اگر بعد از } کاراکتر کلید شروع شد، کاما جاافتاده
+    if (/[a-zA-Z_$]/.test(c) && lastWasClosingBrace) {
+      // Look ahead: identifier followed by optional ws then :
+      let j = i;
+      while (j < len && /[a-zA-Z0-9_$]/.test(text[j])) j++;
+      let k = j;
+      while (k < len && (text[k] === ' ' || text[k] === '\t')) k++;
+      if (k < len && text[k] === ':') {
+        // کاما رو قبل از کاراکتر فعلی درج کن
+        out.push(',');
+      }
+    }
+
+    // default: push
+    out.push(c);
+    lastMeaningful = c;
+    lastWasClosingBrace = false;
+    i++;
+  }
+
+  return out.join('');
+}
+
+// ═══════════════════════════════════════
+//  FILE MANAGEMENT
+// ═══════════════════════════════════════
+function pagesFromName(name) {
+  const base = name.split('/').pop().split('\\').pop();
+  let m = base.match(/صفحه[\s_]*([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/);
+  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
+  m = base.match(/p[\s_]*([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/i);
+  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
+  m = base.match(/([۰-۹0-9]+)\s*[-–_]\s*([۰-۹0-9]+)/);
+  if (m) return [Number(toEn(m[1])), Number(toEn(m[2]))];
+  m = base.match(/([۰-۹0-9]+)/);
+  if (m) return [Number(toEn(m[1])), Number(toEn(m[1]))];
+  return [0, 0];
+}
+
+function detectType(content) {
+  const t = content.trim();
+  if (/🕌\s*استخاره صفحه/.test(t)) return 'markdown';
+  if (/سلام رفیق عزیزم/.test(t)) return 'markdown';
+  if (/📊\s*نتیجه\s*کلی\s*استخاره/.test(t)) return 'markdown';
+  if (/💎\s*پیام محوری/.test(t)) return 'markdown';
+  if (t.startsWith('{') && /page\s*:/.test(t.slice(0, 300))) return 'json';
+  return t.startsWith('{') ? 'json' : 'markdown';
+}
+
+function handleFiles(fl) {
+  const files = Array.from(fl).filter(f => /\.(txt|text|md)$/i.test(f.name));
+  if (!files.length) { status('هیچ فایل .txt/.text/.md پیدا نشد.', 'err'); return; }
+  let done = 0;
+  const total = files.length;
+  files.forEach(f => {
+    const r = new FileReader();
+    r.onload = e => {
+      const content = e.target.result;
+      uploadedFiles.push({ name: f.name, content, size: f.size, type: detectType(content) });
+      done++;
+      if (done === total) {
+        sortFiles();
+        autoUpdateNames();
+        const jsonCount = uploadedFiles.filter(f => f.type === 'json').length;
+        const mdCount = uploadedFiles.filter(f => f.type === 'markdown').length;
+        status(`✅ ${total} فایل بارگذاری شد. JSON: ${jsonCount} • Markdown: ${mdCount}`, 'ok');
+      }
+    };
+    r.onerror = () => { done++; if (done === total) { sortFiles(); autoUpdateNames(); } };
+    r.readAsText(f, 'UTF-8');
+  });
+}
+
 function sortFiles() {
   uploadedFiles.sort((a, b) => {
     const [aMin] = pagesFromName(a.name);
@@ -184,80 +415,33 @@ function sortFiles() {
   renderFileList();
 }
 
-// ═══════════════════════════════════════
-//  به‌روزرسانی خودکار نام فایل و متغیر
-// ═══════════════════════════════════════
 function autoUpdateNames() {
   if (!uploadedFiles.length) return;
-
   let minP = Infinity, maxP = 0;
   uploadedFiles.forEach(f => {
     const [a, b] = pagesFromName(f.name);
     if (a > 0) minP = Math.min(minP, a);
     if (b > 0) maxP = Math.max(maxP, b);
   });
-
   if (minP === Infinity || maxP === 0) return;
-
   const pad = n => String(n).padStart(3, '0');
   document.getElementById('fileName').value = `p${pad(minP)}-${pad(maxP)}`;
   document.getElementById('varName').value = `P${pad(minP)}_${pad(maxP)}`;
 }
 
-// ═══════════════════════════════════════
-//  مدیریت فایل‌های آپلودشده
-// ═══════════════════════════════════════
-function handleFiles(fl) {
-  const files = Array.from(fl).filter(f => /\.(txt|text|md)$/i.test(f.name));
-  if (!files.length) {
-    status('هیچ فایل .txt/.text/.md پیدا نشد.', 'err');
-    return;
-  }
-
-  let done = 0;
-  const total = files.length;
-
-  files.forEach(f => {
-    const r = new FileReader();
-    r.onload = e => {
-      uploadedFiles.push({
-        name: f.name,
-        content: e.target.result,
-        size: f.size
-      });
-      done++;
-      if (done === total) {
-        sortFiles();
-        autoUpdateNames();
-        status(`✅ ${total} فایل بارگذاری و مرتب شد.`, 'ok');
-      }
-    };
-    r.onerror = () => {
-      done++;
-      if (done === total) {
-        sortFiles();
-        autoUpdateNames();
-        status(`⚠️ ${total} فایل با خطاهای احتمالی بارگذاری شد.`, 'warn');
-      }
-    };
-    r.readAsText(f, 'UTF-8');
-  });
-}
-
 function renderFileList() {
   const container = document.getElementById('fileList');
-  if (!uploadedFiles.length) {
-    container.innerHTML = '';
-    return;
-  }
-
+  if (!uploadedFiles.length) { container.innerHTML = ''; return; }
   container.innerHTML = uploadedFiles.map((f, i) => {
     const [a, b] = pagesFromName(f.name);
     const pgTxt = (a && b) ? (a === b ? `صفحه ${a}` : `صفحه ${a}-${b}`) : '؟';
     const base = f.name.split('/').pop().split('\\').pop();
+    const typeBadge = f.type === 'json' ? 'JSON' : 'MD';
+    const typeColor = f.type === 'json' ? '#7c3aed' : '#0891b2';
     return `<div class="file-item">
       <span class="fname">
         <span class="pgnum">${pgTxt}</span>
+        <span class="badge-type" style="background:${typeColor}">${typeBadge}</span>
         <span>📄 ${base}</span>
         <small style="color:#64748b">(${(f.size / 1024).toFixed(1)}KB)</small>
       </span>
@@ -284,41 +468,23 @@ function clearAll() {
   document.getElementById('statusBar').innerHTML = '';
 }
 
-function status(m, t) {
-  document.getElementById('statusBar').innerHTML = m ? `<div class="status ${t}">${m}</div>` : '';
-}
-
-// ═══════════════════════════════════════
-//  Drag & Drop
-// ═══════════════════════════════════════
 const z = document.getElementById('uploadZone');
 z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('dragover'); });
 z.addEventListener('dragleave', () => z.classList.remove('dragover'));
-z.addEventListener('drop', e => {
-  e.preventDefault();
-  z.classList.remove('dragover');
-  handleFiles(e.dataTransfer.files);
-});
+z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
 
 // ═══════════════════════════════════════
-//  پارس بلوک‌های آبجکت (تعادل براکت)
+//  JSON PARSER (Schema v6.2)
 // ═══════════════════════════════════════
 function extractObjectBlocks(text) {
   const blocks = [];
   let i = 0;
   const len = text.length;
-
   while (i < len) {
     while (i < len && text[i] !== '{') i++;
     if (i >= len) break;
-
     const start = i;
-    let depth = 0;
-    let inString = false;
-    let stringChar = '';
-    let escaped = false;
-    let j = i;
-
+    let depth = 0, inString = false, stringChar = '', escaped = false, j = i;
     for (; j < len; j++) {
       const c = text[j];
       if (escaped) { escaped = false; continue; }
@@ -327,35 +493,355 @@ function extractObjectBlocks(text) {
         if (c === stringChar) inString = false;
         continue;
       }
-      if (c === '"' || c === "'" || c === '`') {
-        inString = true;
-        stringChar = c;
-        continue;
-      }
+      if (c === '"' || c === "'" || c === '`') { inString = true; stringChar = c; continue; }
       if (c === '{') depth++;
-      else if (c === '}') {
-        depth--;
-        if (depth === 0) {
-          blocks.push(text.slice(start, j + 1));
-          i = j + 1;
-          break;
-        }
-      }
+      else if (c === '}') { depth--; if (depth === 0) { blocks.push(text.slice(start, j + 1)); i = j + 1; break; } }
     }
     if (j >= len) break;
   }
   return blocks;
 }
 
+// 🆕 tryParse چند مرحله‌ای (v5.3)
+function tryParse(block) {
+  // مرحله ۱: تلاش مستقیم
+  try {
+    const obj = (new Function('return ' + block))();
+    if (obj && typeof obj === 'object') return obj;
+  } catch (e) {}
+
+  // مرحله ۲: با ترمیم کاماهای جاافتاده
+  try {
+    const fixed = fixMissingCommas(block);
+    const obj = (new Function('return ' + fixed))();
+    if (obj && typeof obj === 'object') return obj;
+  } catch (e) {}
+
+  // مرحله ۳: با ترمیم کاما + حذف کاماهای اضافی انتهایی
+  try {
+    const fixed = fixMissingCommas(block).replace(/,(\s*[}\]])/g, '$1');
+    const obj = (new Function('return ' + fixed))();
+    if (obj && typeof obj === 'object') return obj;
+  } catch (e) {}
+
+  // مرحله ۴: eval با ترمیم
+  try {
+    const fixed = fixMissingCommas(block);
+    let obj;
+    eval('obj = ' + fixed);
+    if (obj && typeof obj === 'object') return obj;
+  } catch (e) {}
+
+  return null;
+}
+
 // ═══════════════════════════════════════
-//  اعتبارسنجی صفحه (Schema v6.2)
+//  MARKDOWN PARSER (Schema v5 → v6.2)
+// ═══════════════════════════════════════
+function splitMarkdownRecords(text) {
+  let starts = [...text.matchAll(/🕌\s*استخاره صفحه/g)].map(m => m.index);
+  if (!starts.length) starts = [...text.matchAll(/سلام رفیق عزیزم/g)].map(m => m.index);
+  if (!starts.length) starts = [0];
+  starts = [...new Set(starts)].sort((a, b) => a - b);
+  const segs = [];
+  for (let i = 0; i < starts.length; i++) segs.push(text.slice(starts[i], starts[i + 1] || text.length));
+  return segs;
+}
+
+function extractField(w, lbl, stops) {
+  const m = w.match(lbl); if (!m) return '';
+  const s = m.index + m[0].length;
+  const e = idxOf(w, stops, s);
+  return w.slice(s, e).trim();
+}
+
+function transFromQuote(seg, from) {
+  const mm = /»\s*یعنی\s*/.exec(seg.slice(from));
+  if (!mm) return '';
+  const s = from + mm.index + mm[0].length;
+  const e = idxOf(seg, ['«','📍','💡','⚠️','🛠','🌟 جمع','💎','⚖️'], s);
+  return seg.slice(s, e).replace(/\s+/g, ' ').trim();
+}
+
+function extractArabicGlobal(seg, rec) {
+  if (rec.arabic) return;
+  const runs = [];
+  const re = /[\u0600-\u06FF][\u0600-\u06FF\s\u064B-\u0652\u0670\u06D6-\u06EDٰ]*/g;
+  let m;
+  while ((m = re.exec(seg)) !== null) {
+    let s = m[0];
+    const cut = s.search(/یعنی|[پچژگ]/);
+    if (cut > -1) s = s.slice(0, cut);
+    s = s.replace(/\s+/g, ' ').trim();
+    if (isArabicRun(s)) runs.push({ s, i: m.index, len: m[0].length });
+  }
+  if (!runs.length) return;
+  runs.sort((a, b) => b.s.length - a.s.length);
+  const best = runs[0];
+  rec.arabic = best.s;
+  if (!rec.translation) {
+    const after = seg.slice(best.i + best.len);
+    const mm = after.match(/^\s*[»]?\s*یعنی\s*/);
+    let tr = '';
+    if (mm) tr = after.slice(mm[0].length);
+    else { const mi = after.indexOf('یعنی'); if (mi > -1 && mi < 200) tr = after.slice(mi + 4); }
+    if (tr) {
+      const tEnd = idxOf(tr, ['«','📍','⚠️','🔹','🌟 جمع','💎'], 0);
+      tr = tr.slice(0, tEnd).replace(/\s+/g, ' ').trim();
+      if (tr) rec.translation = tr;
+    }
+    if (!rec.translation) { const q = transFromQuote(seg, best.i); if (q) rec.translation = q; }
+  }
+}
+
+function parseMarkdownRecord(seg, fbPage) {
+  const rec = { page: fbPage || 0, surah: '', ayah: 0, arabic: '', translation: '', level: '', badge: '', intro: '', free_summary: '', cta_free: '', core_message: '', final_summary: '', cta_dua: '', topics: {} };
+  let m;
+  m = seg.match(/🕌\s*استخاره صفحه\s*([۰-۹0-9]+)/);
+  if (m) rec.page = Number(toEn(m[1]));
+
+  let iS = 0;
+  const lm = seg.match(/۱\.\s*بخش رایگان\s*\(خلاصه استخاره\)/);
+  if (lm) iS = lm.index + lm[0].length;
+  rec.intro = seg.slice(iS, idxOf(seg, ['📊','📖','💎'], iS)).trim();
+
+  let lvEnd = -1;
+  m = seg.match(/(?:📊\s*)?نتیجه\s*کلی\s*استخاره\s*[:：]\s*/);
+  if (m) {
+    const s = m.index + m[0].length;
+    const e = idxOf(seg, ['🔑','📍','🌟 جمع','🔹','🗂️','💎'], s);
+    const v = seg.slice(s, e).trim();
+    rec.badge = badgeOf(v);
+    rec.level = stripBadge(v);
+    lvEnd = e;
+  }
+  if (!rec.level) {
+    m = seg.match(/نتیجه\s*کلی\s*استخاره\s*[:：]\s*([^\n🔑]+)/);
+    if (m) { const v = m[1].trim(); rec.badge = badgeOf(v) || rec.badge; rec.level = stripBadge(v); }
+  }
+
+  m = seg.match(/🔑\s*پاسخ کلی استخاره\s*[:：]?\s*/);
+  if (m) {
+    const s = m.index + m[0].length;
+    rec.free_summary = seg.slice(s, idxOf(seg, ['📖',' برای','🌟 جمع','🔹','💎'], s)).trim();
+  } else if (lvEnd > -1) {
+    const e = idxOf(seg, ['📖',' برای','🌟 جمع','🗂️','💎'], lvEnd);
+    const fs = seg.slice(lvEnd, e).trim();
+    if (fs) rec.free_summary = fs;
+  }
+
+  m = seg.match(/📖\s*آیه[‌ ]?ی?\s*اول\s*سرصفحه\s*\(صفحه\s*([۰-۹0-9]+)\s*[–-]\s*سوره\s*([^،)]+?)[،,]\s*آی(?:ه|ات)\s*([۰-۹0-9]+)(?:\s*تا\s*[۰-۹0-9]+)?\)/)
+    || seg.match(/\(صفحه\s*([۰-۹0-9]+)\s*[–-]\s*سوره\s*([^،)]+?)[،,]\s*آی(?:ه|ات)\s*([۰-۹0-9]+)(?:\s*تا\s*[۰-۹0-9]+)?\)/);
+  if (m) {
+    rec.page = Number(toEn(m[1]));
+    rec.surah = m[2].trim();
+    rec.ayah = Number(toEn(m[3]));
+    const s = m.index + m[0].length, e = idxOf(seg, ['📍','📊','🌟 جمع','🗂️'], s), blk = seg.slice(s, e);
+    const cut = blk.search(/«|یعنی|🌐|📍|ترجمه\s*روان|[پچژگ]/);
+    const c = cut < 0 ? blk.length : cut;
+    const ar = blk.slice(0, c).replace(/\s+/g, ' ').trim();
+    if (isArabicRun(ar)) rec.arabic = ar;
+    let tr = blk.slice(c).trim();
+    tr = tr.replace(/^🌐\s*/, '').replace(/^ترجمه\s*روان\s*[:：]?\s*/, '');
+    if (tr.startsWith('«')) { const q = tr.indexOf('»'); tr = q > -1 ? tr.slice(1, q) : tr.slice(1); }
+    const tEnd = idxOf(tr, ['«','📍','🌐','💡','🔹'], 0);
+    tr = tr.slice(0, tEnd).replace(/\s+/g, ' ').trim();
+    if (tr) rec.translation = tr;
+    if (!rec.translation) { const q = transFromQuote(seg, s); if (q) rec.translation = q; }
+  }
+
+  if (!rec.surah || !rec.ayah) {
+    m = seg.match(/📍[^\n🕌]{0,80}?سوره\s*([^|—–]+?)\s*[|—–]\s*آی(?:ه|ات)\s*([۰-۹0-9]+)/);
+    if (m) { if (!rec.surah) rec.surah = m[1].trim(); if (!rec.ayah) rec.ayah = Number(toEn(m[2])); }
+  }
+  if (!rec.surah || !rec.ayah) {
+    m = seg.match(/سوره\s*([^|—–،)»\n]{1,30}?)\s*[|—–]\s*آی(?:ه|ات)\s*([۰-۹0-9]+)/);
+    if (m) { if (!rec.surah) rec.surah = m[1].trim(); if (!rec.ayah) rec.ayah = Number(toEn(m[2])); }
+  }
+
+  extractArabicGlobal(seg, rec);
+
+  m = seg.match(/💡\s*برای دانستن/);
+  if (m) {
+    const s = m.index;
+    let e = seg.indexOf('👇', s);
+    e = e > -1 ? e + 1 : idxOf(seg, ['🔹','🌟 جمع','💎','۲. بخش','🗂️'], s);
+    rec.cta_free = seg.slice(s, e).trim();
+  }
+
+  m = seg.match(/💎\s*پیام محوری و منطوق آیه\s*[:：]?\s*/);
+  let cs = -1;
+  if (m) cs = m.index + m[0].length;
+  else { const rm = seg.match(/رمز این آی(?:ات|ه)/); if (rm) cs = rm.index; }
+  if (cs > -1) rec.core_message = seg.slice(cs, idxOf(seg, ['🔹','🌟 جمع','🗂️'], cs)).trim();
+
+  const hre = /🔹\s*([^🔹]{1,80}?)\s*[:：]\s*نتیجه\s*[:：]/g;
+  let hm;
+  const heads = [];
+  while ((hm = hre.exec(seg)) !== null) heads.push({ i: hm.index, e: hm.index + hm[0].length, name: hm[1] });
+
+  const fillWindow = (hd) => {
+    const key = topicKeyOf(hd.name);
+    if (!key) return;
+    const w = seg.slice(hd.e, idxOf(seg, STOP_HEAD, hd.e));
+    const t = rec.topics[key] || (rec.topics[key] = { verdict: '', badge: '', tip: '', warning: '', action: '' });
+
+    if (!t.verdict) {
+      const vEnd = idxOf(w, ['💡','⚠️','🛠','نکته و رمز','زنگ خطر'], 0);
+      const v = w.slice(0, vEnd).trim();
+      if (v) { t.badge = badgeOf(v); t.verdict = stripBadge(v); }
+    }
+    if (!t.tip) {
+      let tip = extractField(w, LBL_TIP, STOP_TIP);
+      if (!tip) { const a = w.indexOf('بر اساس متن'); if (a > -1) tip = w.slice(a, idxOf(w, STOP_TIP, a)).trim(); }
+      if (tip) t.tip = tip;
+    }
+    if (!t.warning) {
+      let wn = extractField(w, LBL_WARN, STOP_WARN);
+      if (!wn) { const a = w.indexOf('خطر اصلی'); if (a > -1) wn = w.slice(a, idxOf(w, STOP_WARN, a)).trim(); }
+      if (wn) t.warning = wn;
+    }
+    if (!t.action) {
+      let ac = extractField(w, LBL_ACT, STOP_ACT);
+      if (ac) t.action = ac;
+    }
+    if (!t.warning) {
+      const tipM = w.match(LBL_TIP), actM = w.match(LBL_ACT);
+      if (tipM) {
+        const tipStart = tipM.index + tipM[0].length;
+        const tipEnd = idxOf(w, STOP_TIP, tipStart);
+        const actStart = actM ? actM.index : w.length;
+        if (actStart > tipEnd) {
+          let between = w.slice(tipEnd, actStart).trim();
+          between = between.replace(/^(?:⚠️\s*)?(?:زنگ\s*خطر\s*\/\s*هشدار\s*[:：]?)?\s*/, '').trim();
+          if (between.length > 5 && WARN_HINT.test(between)) t.warning = between;
+        }
+      }
+    }
+  };
+
+  heads.forEach(fillWindow);
+  for (const key of ALL_KEYS) {
+    if (rec.topics[key] && rec.topics[key].verdict && rec.topics[key].tip && rec.topics[key].warning) continue;
+    for (const n of (NAME_VARIANTS[key] || [])) {
+      const re2 = new RegExp('🔹[^]{0,80}?' + escRe(n) + '[^:：]{0,40}[:：]\\s*نتیجه\\s*[:：]');
+      const x = seg.match(re2);
+      if (x) { fillWindow({ i: x.index, e: x.index + x[0].length, name: n }); break; }
+    }
+  }
+
+  m = seg.match(/🌟\s*جمع‌بندی نهایی استخاره\s*(?:صفحه\s*[۰-۹0-9]+)?\s*(?:\(بر پایه‌ی[^)]*\))?\s*[:：]?\s*/);
+  if (m) { const s = m.index + m[0].length; rec.final_summary = seg.slice(s, idxOf(seg, ['💡','⚖️','🕌','🗂️'], s)).trim(); }
+
+  m = seg.match(/💡\s*(?:اگه می‌خوای|اگر می‌خواهی)/);
+  if (m) { const s = m.index; rec.cta_dua = seg.slice(s, idxOf(seg, ['⚖️','🕌'], s)).trim(); }
+
+  if (!rec.page) rec.page = fbPage || 0;
+  return rec;
+}
+
+// ═══════════════════════════════════════
+//  CONVERT v5 → v6.2
+// ═══════════════════════════════════════
+function splitToBullets(text) {
+  if (!text) return [];
+  const bulletLines = text.split(/\n/).filter(l => /^\s*[-•*]\s/.test(l));
+  if (bulletLines.length >= 2) {
+    return bulletLines.map(l => l.replace(/^\s*[-•*]\s+/, '').trim()).filter(Boolean);
+  }
+  const parts = text.split(/\n+/).map(s => s.trim()).filter(s => s.length > 15);
+  if (parts.length >= 2 && parts.length <= 5) return parts;
+  const sentences = text.split(/[.؟!؟]\s+/).map(s => s.trim()).filter(s => s.length > 20);
+  if (sentences.length >= 2) return sentences.slice(0, 4);
+  return text.trim() ? [text.trim()] : [];
+}
+
+function splitToActions(text) {
+  if (!text) return [];
+  const lines = text.split(/\n/).filter(l => /^\s*[-•*✅❌⛔💍💼💰🏡🚗📈💳📚🩺🤝🔧🕌💸🤲📿👥🔍⏳📋🚀🌸✈️📦🎓⚖️🏘️🧾⛔🕵️🛡️💪📝⏰🗑️]/.test(l) || /^\s*[-•*]\s/.test(l));
+  if (lines.length >= 2) return lines.map(l => l.replace(/^\s*[-•*]\s+/, '').trim()).filter(Boolean);
+  const parts = text.split(/\n+/).map(s => s.trim()).filter(s => s.length > 10);
+  if (parts.length >= 2) return parts;
+  return text.trim() ? [text.trim()] : [];
+}
+
+function shortLevel(level) {
+  if (!level) return 'میانه';
+  const m = level.match(/(بسیار\s*خوب|بسیار\s*بد|میانه\s*رو\s*به\s*خوب|میانه\s*رو\s*به\s*بد|خوب|میانه|بد)/);
+  return m ? m[1].trim() : level.trim();
+}
+
+function buildOpeningFromIntro(intro) {
+  if (!intro) return '';
+  const lines = intro.split(/\n/).map(l => l.trim()).filter(Boolean);
+  return lines.slice(0, 2).join(' ').trim();
+}
+
+function buildMessageFromFreeSummary(free) {
+  if (!free) return '';
+  const lines = free.split(/\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length >= 3) return lines.slice(0, 3).join(' ');
+  return free.trim();
+}
+
+function normalizeV5ToV62(rec) {
+  const out = {
+    page: rec.page || 0,
+    surah: rec.surah || '',
+    ayah: rec.ayah || 0,
+    badge: rec.badge || '',
+    free: {
+      result_short: shortLevel(rec.level),
+      opening: buildOpeningFromIntro(rec.intro),
+      arabic: rec.arabic || '',
+      translation: rec.translation || '',
+      message: buildMessageFromFreeSummary(rec.free_summary),
+      cta: rec.cta_free || '💡 برای دیدن جزئیات تخصصی، بخش «💎 استخاره تخصصی» رو باز کن. 👇'
+    },
+    topics: {}
+  };
+
+  for (const key of ALL_KEYS) {
+    const t = rec.topics[key] || {};
+    const verdict = shortLevel(t.verdict);
+    const corePoints = splitToBullets(rec.core_message || '');
+    const actions = splitToActions(t.action || '');
+    if (actions.length === 0) actions.push('💪 با بررسی دقیق و مشورت، تصمیم بگیر.');
+    const duaRef = DUA_REF_MAP[key];
+    const duaLine = '📿 دعای ' + keyToFaLabel(key) + ' — متن کامل در بخش «📿 ادعیه و اذکار».';
+    if (!actions.some(a => a.includes('دعا'))) actions.push(duaLine);
+    const summary = rec.final_summary || '';
+    out.topics[key] = {
+      verdict: verdict,
+      badge: t.badge || rec.badge || '',
+      result_detail: t.tip ? t.tip.slice(0, 120) : (verdict + ' — ' + (t.tip || '').slice(0, 80)),
+      core_points: corePoints.length ? corePoints : ['پیام محوری این آیه در نیت تو جاریست.'],
+      tip: t.tip || '',
+      warning: t.warning || '',
+      actions: actions,
+      summary: summary,
+      dua_ref: duaRef
+    };
+  }
+  return out;
+}
+
+function keyToFaLabel(key) {
+  const labels = {
+    marriage: 'ازدواج', trade: 'معامله', work: 'کار', home: 'خانه',
+    car: 'خودرو', investment: 'سرمایه‌گذاری', loan: 'وام', study: 'تحصیل', health: 'سلامت'
+  };
+  return labels[key] || key;
+}
+
+// ═══════════════════════════════════════
+//  VALIDATION
 // ═══════════════════════════════════════
 function validatePage(obj) {
   const w = [];
   if (!obj.surah) w.push('surah خالی');
   if (!obj.ayah) w.push('ayah خالی');
   if (!obj.badge) w.push('badge خالی');
-
   if (!obj.free) w.push('free نیس');
   else {
     const f = obj.free;
@@ -366,7 +852,6 @@ function validatePage(obj) {
     if (!f.message) w.push('message خالی');
     if (!f.cta) w.push('cta خالی');
   }
-
   if (!obj.topics) w.push('topics نیس');
   else {
     const keys = Object.keys(obj.topics);
@@ -388,43 +873,49 @@ function validatePage(obj) {
 }
 
 // ═══════════════════════════════════════
-//  پردازش کل ورودی
+//  MAIN PROCESS
 // ═══════════════════════════════════════
 function processInput() {
   if (!uploadedFiles.length) {
     status('هیچ فایلی آپلود نشده.', 'err');
     return;
   }
-
-  // ترتیب فایل‌ها بر اساس صفحه
   sortFiles();
-
   parsedPages = [];
 
-  // پردازش هر فایل به ترتیب
   for (const f of uploadedFiles) {
     const fp = pagesFromName(f.name);
-    const blocks = extractObjectBlocks(f.content);
 
-    for (let i = 0; i < blocks.length; i++) {
-      const block = blocks[i];
-      try {
-        const obj = (new Function('return ' + block))();
+    if (f.type === 'json') {
+      const cleaned = stripComments(f.content);
+      const blocks = extractObjectBlocks(cleaned);
+      for (const block of blocks) {
+        if (!/page\s*:/.test(block.slice(0, 200))) continue;
+        const obj = tryParse(block);
         if (obj && typeof obj === 'object' && obj.page) {
-          parsedPages.push({ obj, raw: block, valid: true, sourceFile: f.name });
+          parsedPages.push({ obj, raw: block, valid: true, sourceFile: f.name, sourceType: 'json' });
         } else {
-          parsedPages.push({ obj: null, raw: block, valid: false, error: 'ساختار نامعتبر', sourceFile: f.name });
+          parsedPages.push({ obj: null, raw: block, valid: false, error: 'پارس نشد', sourceFile: f.name, sourceType: 'json' });
         }
-      } catch (e) {
-        parsedPages.push({ obj: null, raw: block, valid: false, error: e.message, sourceFile: f.name });
+      }
+    } else {
+      const records = splitMarkdownRecords(f.content);
+      for (const seg of records) {
+        if (!seg.trim()) continue;
+        try {
+          const rec = parseMarkdownRecord(seg, fp[0] || 0);
+          if (!rec.page && fp[0]) rec.page = fp[0];
+          const normalized = normalizeV5ToV62(rec);
+          parsedPages.push({ obj: normalized, raw: seg.slice(0, 200), valid: true, sourceFile: f.name, sourceType: 'markdown' });
+        } catch (e) {
+          parsedPages.push({ obj: null, raw: seg.slice(0, 200), valid: false, error: e.message, sourceFile: f.name, sourceType: 'markdown' });
+        }
       }
     }
   }
 
-  // مرتب‌سازی بر اساس page
   parsedPages.sort((a, b) => (a.obj?.page || 0) - (b.obj?.page || 0));
 
-  // حذف تکراری بر اساس page
   const seen = new Set();
   parsedPages = parsedPages.filter(p => {
     if (!p.valid) return true;
@@ -433,9 +924,7 @@ function processInput() {
     return true;
   });
 
-  // اعتبارسنجی
-  let validCount = 0;
-  let warnCount = 0;
+  let validCount = 0, warnCount = 0;
   for (const p of parsedPages) {
     if (!p.valid) continue;
     p.warnings = validatePage(p.obj);
@@ -444,22 +933,19 @@ function processInput() {
   }
 
   renderPagesList();
-
   const varName = document.getElementById('varName').value.trim() || 'PARSED';
   finalOutput = buildJSFile(varName, parsedPages);
   document.getElementById('outputCode').textContent = finalOutput;
 
-  status(`✅ ${parsedPages.length} بلوک پارس شد. ${validCount} کامل، ${warnCount} با اخطار.`,
+  const jsonCount = parsedPages.filter(p => p.sourceType === 'json').length;
+  const mdCount = parsedPages.filter(p => p.sourceType === 'markdown').length;
+  status(`✅ ${parsedPages.length} بلوک پارس شد (JSON: ${jsonCount} • Markdown: ${mdCount}). ${validCount} کامل، ${warnCount} با اخطار.`,
     warnCount === 0 && parsedPages.length === validCount ? 'ok' : 'warn');
 }
 
 function renderPagesList() {
   const container = document.getElementById('pagesList');
-  if (!parsedPages.length) {
-    container.innerHTML = 'هیچ صفحه‌ای شناسایی نشد.';
-    return;
-  }
-
+  if (!parsedPages.length) { container.innerHTML = 'هیچ صفحه‌ای شناسایی نشد.'; return; }
   container.innerHTML = parsedPages.map((p, i) => {
     if (!p.valid) {
       return `<div class="page-item err">⚠️ بلوک ${i + 1} (${p.sourceFile}): نامعتبر — ${p.error}</div>`;
@@ -468,31 +954,31 @@ function renderPagesList() {
     const topicCount = Object.keys(obj.topics || {}).length;
     const isOk = p.warnings && p.warnings.length === 0;
     const cls = isOk ? '' : (topicCount >= 9 ? 'warn' : 'err');
+    const srcTag = p.sourceType === 'markdown' ? ' (MD)' : ' (JSON)';
     return `<div class="page-item ${cls}">
-      📄 صفحه ${obj.page} — ${obj.surah || '؟'} | آیه ${obj.ayah || '؟'} — ${topicCount}/9 موضوع
-      ${p.warnings && p.warnings.length ? ' ⚠️ ' + p.warnings.slice(0, 4).join(', ') + (p.warnings.length > 4 ? '...' : '') : ' ✅'}
+      📄 صفحه ${obj.page}${srcTag} — ${obj.surah || '؟'} | آیه ${obj.ayah || '؟'} — ${topicCount}/9
+      ${p.warnings && p.warnings.length ? ' ⚠️ ' + p.warnings.slice(0, 3).join(', ') + (p.warnings.length > 3 ? '...' : '') : ' ✅'}
     </div>`;
   }).join('');
 }
 
 // ═══════════════════════════════════════
-//  ساخت فایل JS نهایی — Schema v6.2
+//  BUILD JS FILE
 // ═══════════════════════════════════════
 const J = (s) => JSON.stringify(s || '');
 
 function buildJSFile(varName, pages) {
   const fileName = document.getElementById('fileName').value || 'output';
   let js = `// content/${fileName}.js\n`;
-  js += `// Auto-generated by Neshan Sampler v5 — Schema v6.2\n`;
+  js += `// Auto-generated by Neshan Sampler v5.3 — Schema v6.2\n`;
   js += `// ${pages.filter(p => p.valid).length} صفحه\n\n`;
   js += `export const ${varName} = [\n`;
 
   pages.forEach((p, i) => {
     if (!p.valid) {
-      js += `\n  // ⚠️ بلوک ناقص — دستی اصلاح کن\n  // ${p.raw.slice(0, 100)}...\n`;
+      js += `\n  // ⚠️ بلوک ناقص — دستی اصلاح کن\n  // ${String(p.raw).slice(0, 100)}...\n`;
       return;
     }
-
     const obj = p.obj;
     js += `\n  // ── صفحه ${obj.page} (سوره ${obj.surah || '؟'}، آیه ${obj.ayah || '؟'}) ──\n`;
     js += `  {\n`;
@@ -501,7 +987,6 @@ function buildJSFile(varName, pages) {
     js += `    ayah: ${obj.ayah || 0},\n`;
     js += `    badge: ${J(obj.badge)},\n`;
     js += `    free: {\n`;
-
     const free = obj.free || {};
     js += `      result_short: ${J(free.result_short)},\n`;
     js += `      opening: ${J(free.opening || free.salutation || '')},\n`;
@@ -511,7 +996,6 @@ function buildJSFile(varName, pages) {
     js += `      cta: ${J(free.cta)}\n`;
     js += `    },\n`;
     js += `    topics: {\n`;
-
     const topicKeys = Object.keys(obj.topics || {});
     topicKeys.forEach((k, ki) => {
       const t = obj.topics[k] || {};
@@ -519,38 +1003,26 @@ function buildJSFile(varName, pages) {
       js += `        verdict: ${J(t.verdict)},\n`;
       js += `        badge: ${J(t.badge)},\n`;
       js += `        result_detail: ${J(t.result_detail)},\n`;
-
-      // topic_hook اختیاری
       if (t.topic_hook && String(t.topic_hook).trim()) {
         js += `        topic_hook: ${J(t.topic_hook)},\n`;
       }
-
       js += `        core_points: ${JSON.stringify(t.core_points || [])},\n`;
       js += `        tip: ${J(t.tip)},\n`;
       js += `        warning: ${J(t.warning)},\n`;
       js += `        actions: ${JSON.stringify(t.actions || [])},\n`;
       js += `        summary: ${J(t.summary)},\n`;
       js += `        dua_ref: ${J(t.dua_ref)}\n`;
-      // ⛔ wisdom و dua_text به‌عمد حذف می‌شوند
       js += `      }${ki < topicKeys.length - 1 ? ',' : ''}\n`;
     });
-
     js += `    }\n`;
     js += `  }${i < pages.length - 1 ? ',' : ''}\n`;
   });
-
   js += `\n];\n`;
   return js;
 }
 
-// ═══════════════════════════════════════
-//  دانلود و کپی
-// ═══════════════════════════════════════
 function downloadFile() {
-  if (!finalOutput) {
-    alert('اول پردازش کن');
-    return;
-  }
+  if (!finalOutput) { alert('اول پردازش کن'); return; }
   const name = (document.getElementById('fileName').value || 'output') + '.js';
   const blob = new Blob([finalOutput], { type: 'text/javascript;charset=utf-8' });
   const a = document.createElement('a');
@@ -560,10 +1032,7 @@ function downloadFile() {
 }
 
 function copyOutput() {
-  if (!finalOutput) {
-    alert('اول پردازش کن');
-    return;
-  }
+  if (!finalOutput) { alert('اول پردازش کن'); return; }
   if (navigator.clipboard) {
     navigator.clipboard.writeText(finalOutput);
     status('📋 خروجی کپی شد', 'ok');
