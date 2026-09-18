@@ -16,28 +16,23 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Syntax check (ESM)
-        run: |
-          set +e
-          mkdir -p /tmp/modules
-          mkdir -p /tmp/content
-          cp *.js /tmp/ 2>/dev/null || true
-          cp modules/*.js /tmp/modules/ 2>/dev/null || true
-          cp content/*.js /tmp/content/ 2>/dev/null || true
-          cp index.js /tmp/check.mjs
-          node --input-type=module -e "await import('file:///tmp/check.mjs');" > check.log 2>&1
-          code=$?
-          if [ $code -ne 0 ]; then
-            echo "### ❌ خطای سینتکس در index.js" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            cat check.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-          echo "### ✅ سینتکس سالم (ESM)" >> $GITHUB_STEP_SUMMARY
-
       - name: Install Wrangler
         run: npm install -g wrangler@3
+
+      - name: Build check (dry-run)
+        run: |
+          set +e
+          wrangler deploy --dry-run --outdir=./.dry-run-check > build.log 2>&1
+          code=$?
+          echo "### 🔍 بررسی ساخت (dry-run)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat build.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          if [ $code -ne 0 ]; then
+            echo "### ❌ خطای ساخت — Wrangler" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "### ✅ ساخت سالم" >> $GITHUB_STEP_SUMMARY
 
       - name: Deploy Worker
         env:
