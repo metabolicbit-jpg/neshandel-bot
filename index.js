@@ -2,130 +2,57 @@
 import { DurableObject } from "cloudflare:workers";
 import { CONTENT } from "./content/index.js";
 
-// ========== 2. CONSTANTS ==========
-const API_BASE = "https://tapi.bale.ai";
-const DRAW_COOLDOWN_MS = 5000;
-const DO_VERSION_PREFIX = "v4:";
-const BACKUP_RETENTION_DAYS = 30;
-const HISTORY_LIMIT = 10;
-const REFERRAL_REWARD_REFERRER = 1;
-const REFERRAL_REWARD_NEW_USER = 1;
-const REFERRAL_BASE_LINK = "https://ble.ir/";
+import {
+  API_BASE,
+  DRAW_COOLDOWN_MS,
+  DO_VERSION_PREFIX,
+  BACKUP_RETENTION_DAYS,
+  HISTORY_LIMIT,
+  REFERRAL_REWARD_REFERRER,
+  REFERRAL_REWARD_NEW_USER,
+  REFERRAL_BASE_LINK,
+  CURRENT_PHASE,
+  CATEGORIES,
+  PACKS,
+  ALIAS,
+} from "./modules/constants.js";
 
-const CATEGORIES = [
-  { id:"family", label:"👪 خانواده", full:"روابط و خانواده", topics:[
-    { id:"marriage",   label:"🤵👰 ازدواج",   short:"ازدواج" },
-    { id:"proposal",   label:"💐 خواستگاری", short:"خواستگاری", phase:2 },
-    { id:"childbirth", label:"🤰 فرزندآوری", short:"فرزندآوری", phase:2 },
-    { id:"divorce",    label:"💔 طلاق",      short:"طلاق", hidden:true },
-    { id:"breakup",    label:"❌ فسخ",       short:"فسخ", hidden:true },
-    { id:"reconcile",  label:"🕊️ آشتی",     short:"آشتی", phase:2 },
-  ]},
-  { id:"business", label:"💼 کسب‌وکار", full:"شغل و کسب‌وکار", topics:[
-    { id:"work",        label:"💼 کار",       short:"کار" },
-    { id:"trade",       label:"💰 معامله",    short:"معامله" },
-    { id:"partnership", label:"🤝 شراکت",     short:"شراکت", phase:2 },
-    { id:"investment",  label:"📈 سرمایه‌گذاری", short:"سرمایه‌گذاری" },
-    { id:"resign",      label:"🚪 استعفا",    short:"استعفا", phase:2 },
-    { id:"business2",   label:"🏪 کسب شخصی", short:"کسب شخصی", phase:2, key:"business" },
-    { id:"legal",       label:"⚖️ حقوقی",    short:"حقوقی", phase:2 },
-    { id:"loan",        label:"💳 وام",       short:"وام", phase:2 },
-  ]},
-  { id:"asset", label:"🏠 دارایی", full:"دارایی و ملک", topics:[
-    { id:"home",      label:"🏠 خانه",  short:"خانه" },
-    { id:"car",       label:"🚗 خودرو", short:"خودرو" },
-    { id:"guarantee", label:"💸 ضمانت", short:"ضمانت", phase:2 },
-  ]},
-  { id:"travel", label:"✈️ سفر", full:"سفر و جابجایی", topics:[
-    { id:"travel",    label:"✈️ سفر",    short:"سفر" },
-    { id:"migration", label:"🌍 مهاجرت", short:"مهاجرت" },
-    { id:"moving",    label:"📦 جابجایی", short:"جابجایی", phase:2 },
-  ]},
-  { id:"study", label:"🎓 تحصیل", full:"تحصیل", topics:[
-    { id:"study", label:"🎓 تحصیل", short:"تحصیل" },
-  ]},
-  { id:"health", label:"🩺 سلامت", full:"سلامت", topics:[
-    { id:"health", label:"🩺 سلامتی", short:"سلامتی" },
-  ]},
-];
+import { DUA_BANK, getDua } from "./modules/duas.js";
 
-const CURRENT_PHASE = 1;
+import {
+  DISCLAIMER,
+  WELCOME,
+  WELCOME_REFERRAL,
+  RITUAL,
+  STORE_MSG,
+  NO_CREDIT_MSG,
+  RATE_LIMIT_MSG,
+  ADMIN_ONLY_MSG,
+  START_ERROR_MSG,
+} from "./modules/messages.js";
 
-const PACKS = [
-  { id:"p10",  credits:10,  bonus:0,  rials:200000,  title:"بستهٔ ۱۰ اعتبار",  label:"۱۰ اعتبار",  desc:"۱۰ اعتبار — ۱۰ استخارهٔ تخصصی", text:"🥉 ۱۰ اعتبار — ۲۰,۰۰۰ تومان" },
-  { id:"p30",  credits:30,  bonus:5,  rials:500000,  title:"بستهٔ ۳۵ اعتبار",  label:"۳۵ اعتبار",  desc:"۳۰ اعتبار + ۵ هدیه",          text:"🥈 ۳۵ اعتبار — ۵۰,۰۰۰ تومان" },
-  { id:"p100", credits:100, bonus:20, rials:1500000, title:"بستهٔ ۱۲۰ اعتبار", label:"۱۲۰ اعتبار", desc:"۱۰۰ اعتبار + ۲۰ هدیه",        text:"🥇 ۱۲۰ اعتبار — ۱۵۰,۰۰۰ تومان" },
-];
+import {
+  toFa,
+  topicInfo,
+  topicShort,
+  topicKey,
+  isUserAllowed,
+  isUserAdmin,
+  checkAdminSecret,
+  buildReferralLink,
+  renderAction,
+  renderCorePoints,
+  topicBlockV5,
+} from "./modules/utils.js";
 
-// ========== DUA_BANK (Schema v6.2) ==========
-const DUA_BANK = {
-  "marriage.main": {
-    text: "رَبَّنَا هَبْ لَنَا مِنْ أَزْوَاجِنَا وَذُرِّيَّاتِنَا قُرَّةَ أَعْيُنٍ وَاجْعَلْنَا لِلْمُتَّقِينَ إِمَامًا",
-    translation: "پروردگارا، از همسران و فرزندانمان مایه‌ی روشنی چشم به ما عطا کن و ما را پیشوای پرهیزگاران قرار ده.",
-    source: "فرقان ۷۴",
-  },
-  "trade.main": {
-    text: "اللَّهُمَّ إِنِّي أَسْأَلُكَ عِلْمًا نَافِعًا وَرِزْقًا طَيِّبًا وَعَمَلًا مُتَقَبَّلًا",
-    translation: "خدایا، از تو دانش سودمند، روزی پاک و کردار پذیرفته می‌خواهم.",
-    source: "حدیث",
-  },
-  "work.main": {
-    text: "رَبِّ إِنِّي لِمَا أَنزَلْتَ إِلَيَّ مِنْ خَيْرٍ فَقِيرٌ",
-    translation: "پروردگارا، من به هر خیری که بر من فرو فرستی نیازمندم.",
-    source: "قصص ۲۴",
-  },
-  "home.main": {
-    text: "رَبِّ أَنزِلْنِي مُنزَلًا مُّبَارَكًا وَأَنتَ خَيْرُ الْمُنزِلِينَ",
-    translation: "پروردگارا، مرا در جایگاهی پربرکت فرود آور که تو بهترین جای‌دهندگانی.",
-    source: "مؤمنون ۲۹",
-  },
-  "car.main": {
-    text: "بِسْمِ اللَّهِ الَّذِي لَا يَضُرُّ مَعَ اسْمِهِ شَيْءٌ فِي الْأَرْضِ وَلَا فِي السَّمَاءِ وَهُوَ السَّمِيعُ الْعَلِيمُ",
-    translation: "به نام خدایی که با نامش هیچ چیز در زمین و آسمان آسیب نمی‌رساند؛ و او شنوا و داناست.",
-    source: "حدیث",
-  },
-  "investment.main": {
-    text: "اللَّهُمَّ بَارِكْ لَنَا فِي أَمْوَالِنَا وَأَوْلَادِنَا وَاجْعَلْنَا مِنَ الشَّاكِرِينَ",
-    translation: "خدایا، در اموال و فرزندانمان برکت ده و ما را از سپاسگزاران قرار ده.",
-    source: "حدیث",
-  },
-  "loan.main": {
-    text: "اللَّهُمَّ اكْفِنِي بِحَلَالِكَ عَنْ حَرَامِكَ وَأَغْنِنِي بِفَضْلِكَ عَمَّن سِوَاكَ",
-    translation: "خدایا، مرا با حلال خود از حرام بی‌نیاز کن و با فضلت از غیر خودت بی‌نیاز ساز.",
-    source: "حدیث",
-  },
-  "study.main": {
-    text: "رَبِّ زِدْنِي عِلْمًا",
-    translation: "پروردگارا، بر دانش من بیفزا.",
-    source: "طه ۱۱۴",
-  },
-  "health.main": {
-    text: "وَإِذَا مَرِضْتُ فَهُوَ يَشْفِينِ",
-    translation: "و هنگامی که بیمار شدم، او مرا شفا می‌دهد.",
-    source: "شعراء ۸۰",
-  },
-};
-
-function getDua(duaRef) {
-  if (!duaRef) return null;
-  return DUA_BANK[duaRef] || null;
+// ⚠️ pickIndex محلی (وابسته به CONTENT است)
+function pickIndex() {
+  const b = new Uint32Array(1);
+  crypto.getRandomValues(b);
+  return b[0] % CONTENT.length;
 }
 
-const DISCLAIMER = "⚖️ سلب مسئولیت و نکته مهم فقهی: فراموش نکنید که در احکام اسلامی، استخاره جایگزین عقل، تحقیق و مشورت نیست و «وحی منزل» محسوب نمی‌شود. این متن صرفاً یک تفسیر و راهنمای معنوی بر اساس آیات قرآن است. لذا برای تصمیمات حساس زندگی‌تان، حتماً در کنار این استخاره، با متخصصان و مشاوران کارآزمودهٔ آن حوزه مشورت فرمایید. 🤝";
-
-const WELCOME = "🌿 به «نشانِ دل» خوش آمدی.\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
-const WELCOME_REFERRAL = "🎁 <b>به «نشانِ دل» خوش آمدی!</b>\n\nبا لینک دعوت دوستت اومدی — <b>۳ اعتبار هدیه</b> گرفتی (۲ + ۱ جایزه).\n\n⚖️ استخاره برای طلب خیر است و جایگزین مشورت نیست.\n\nبرای شروع، «🔮 استخاره» را بزن.";
-const RITUAL = "🤲 <b>آداب کوتاه:</b>\n۱. نیتت را روشن کن.\n۲. وضو و رو به قبله.\n۳. سه صلوات.\n\n<b>دعای استخاره:</b>\n«اللّهُمَّ إِنِّی تَفَأَّلْتُ بِکِتابِکَ، وَ تَوَکَّلْتُ عَلَیْکَ، فَأَرِنی مِنْ کِتابِکَ ما هُوَ مَکْتومٌ مِنْ سِرِّکَ المَکْنونِ في غَیْبِکَ»";
-const STORE_MSG = "🛍 <b>فروشگاه اعتبار «نشانِ دل»</b>\n\nهر اعتبار = یک استخارهٔ تخصصی با تحلیل کامل موضوع تو\n\nیه بسته انتخاب کن تا صورتحساب کیف‌پولی برات بیاد:";
-const NO_CREDIT_MSG = "🌿 دوست عزیز، اعتبارت تموم شده.\n\nبرای دیدن استخارهٔ تخصصی همین موضوع، یکی از بسته‌ها رو انتخاب کن؛ کمتر از یک دقیقه شارژ می‌شه. 🌙";
-const RATE_LIMIT_MSG = "⏳ لطفاً چند لحظه صبر کن و بعد دوباره استخاره بگیر.";
-const ADMIN_ONLY_MSG = "⛔ این فرمان فقط برای مدیر بات قابل دسترسی است.";
-const START_ERROR_MSG = "⚠️ خطا در ثبت‌نام. لطفاً دوباره /start بزن.";
-
-const toFa = n => String(n).replace(/\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
-const ALIAS = { trade:"transaction", business2:"business" };
-
-// ========== 3. DURABLE OBJECT ==========
+// ========== 2. DURABLE OBJECT ==========
 export class CreditManager extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -215,7 +142,11 @@ export class CreditManager extends DurableObject {
     this._ensureSchema();
     const r = this._selectOne(`SELECT * FROM credits WHERE user_id = ?`, userId);
     if (r) return r;
-    return { user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0, last_topic: null, last_page: null, last_draw_time: 0, unlocked: "[]", name: "", joined: 0, referral_count: 0, referred_by: null };
+    return {
+      user_id: userId, amount: 0, total_estekhare: 0, total_opens: 0,
+      last_topic: null, last_page: null, last_draw_time: 0,
+      unlocked: "[]", name: "", joined: 0, referral_count: 0, referred_by: null,
+    };
   }
 
   async ensureUser(userId, name) {
@@ -440,7 +371,7 @@ export class CreditManager extends DurableObject {
   }
 }
 
-// ========== 4. HELPERS ==========
+// ========== 3. API HELPERS ==========
 async function baleCall(env, method, payload) {
   const url = API_BASE + "/bot" + env.BOT_TOKEN + "/" + method;
   const res = await fetch(url, {
@@ -455,15 +386,21 @@ async function baleCall(env, method, payload) {
 
 const sendMessage = (env, chat_id, text, reply_markup) =>
   baleCall(env, "sendMessage", { chat_id, text, parse_mode: "HTML", reply_markup });
-const answerCallback = (env, id) => baleCall(env, "answerCallbackQuery", { callback_query_id: id });
+
+const answerCallback = (env, id) =>
+  baleCall(env, "answerCallbackQuery", { callback_query_id: id });
+
 const sendInvoice = (env, chat_id, pack) =>
   baleCall(env, "sendInvoice", {
     chat_id, title: pack.title, description: pack.desc, payload: pack.id,
     provider_token: env.WALLET_TOKEN || "WALLET-TEST-1111111111111111",
     prices: [{ label: pack.label, amount: pack.rials }],
   });
+
 const answerPreCheckout = (env, id, ok, error_message) =>
-  baleCall(env, "answerPreCheckoutQuery", { pre_checkout_query_id: id, ok, ...(error_message ? { error_message } : {}) });
+  baleCall(env, "answerPreCheckoutQuery", {
+    pre_checkout_query_id: id, ok, ...(error_message ? { error_message } : {}),
+  });
 
 function getStub(env, userId) {
   const id = env.CREDIT_MANAGER.idFromName(DO_VERSION_PREFIX + String(userId));
@@ -486,76 +423,7 @@ async function getBotUsername(env) {
   return null;
 }
 
-function buildReferralLink(username, chatId) {
-  if (!username) return null;
-  return REFERRAL_BASE_LINK + username + "?start=ref_" + chatId;
-}
-
-function isUserAllowed(env, chatId) {
-  const list = (env.ALLOWED_USERS || "").trim();
-  if (!list) return true;
-  return list.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)).includes(chatId);
-}
-
-function isUserAdmin(env, chatId) {
-  const list = (env.ADMIN_USERS || "").trim();
-  if (!list) return false;
-  return list.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)).includes(chatId);
-}
-
-function checkAdminSecret(env, url) {
-  const provided = url.searchParams.get("auth") || "";
-  const secret = (env.ADMIN_SECRET || "").trim();
-  return secret && provided === secret;
-}
-
-function pickIndex() {
-  const b = new Uint32Array(1);
-  crypto.getRandomValues(b);
-  return b[0] % CONTENT.length;
-}
-
-function topicInfo(id) {
-  for (const c of CATEGORIES) for (const t of c.topics) if (t.id === id) return t;
-  return { id, label: "❓ تصمیم دیگر", short: "تصمیم تو" };
-}
-function topicShort(id) { return topicInfo(id).short || "تصمیم تو"; }
-function topicKey(id) { const t = topicInfo(id); return t.key || t.id; }
-
-function renderAction(a) {
-  if (Array.isArray(a)) return a.map(x => "-   " + x).join("\n");
-  return a || "";
-}
-
-function renderCorePoints(cp) {
-  if (!Array.isArray(cp) || cp.length === 0) return "";
-  return cp.map(c => "• " + c).join("\n");
-}
-
-function topicBlockV5(r, t) {
-  const k = topicKey(t);
-  const T = (r.topics || {})[k] || (r.topics || {})[ALIAS[t]];
-  if (T) return T;
-  return {
-    verdict: r.level || r.verdict || "میانه",
-    badge: r.badge || "⚖️",
-    result_detail: "",
-    core_points: [],
-    tip: r.core_message || "",
-    warning: "این موضوع به‌صورت اختصاصی برای این صفحه تفسیر نشده؛ با احتیاط و مشورت پیش برو.",
-    actions: [
-      "💪 به پیام محوری آیه توجه کن و با بررسی دقیق تصمیم بگیر.",
-      "🤝 با یک فرد خبره یا مشاور کارآزموده مشورت کن.",
-      "🤲 صدقه بده و با توکل بر خدا اقدام کن.",
-      "📿 دعای موضوع — متن کامل در بخش «📿 ادعیه و اذکار».",
-    ],
-    summary: r.final_summary || "",
-    dua_ref: null,
-    topic_hook: null,
-  };
-}
-
-// ========== 5. ADMIN HELPERS ==========
+// ========== 4. ADMIN HELPERS ==========
 async function broadcast(env, text) {
   let cursor; let sent = 0, failed = 0;
   for (;;) {
@@ -637,7 +505,12 @@ async function performBackup(env) {
     }
   }
 
-  const backup = { timestamp: startedAt, date: new Date(startedAt).toISOString(), userCount: Object.keys(allData).length, users: allData };
+  const backup = {
+    timestamp: startedAt,
+    date: new Date(startedAt).toISOString(),
+    userCount: Object.keys(allData).length,
+    users: allData,
+  };
   const dateKey = new Date(startedAt).toISOString().split("T")[0];
   const kvKey = "backup:" + dateKey;
   const ttl = (BACKUP_RETENTION_DAYS + 5) * 24 * 60 * 60;
@@ -662,19 +535,53 @@ async function listBackups(env) {
   return backups;
 }
 
-// ========== 6. KEYBOARDS ==========
-const mainKb = { keyboard: [[{ text: "🔮 استخاره" }], [{ text: "👤 حساب من" }, { text: "🛍 فروشگاه" }]], resize_keyboard: true, is_persistent: true };
-const storeKb = { inline_keyboard: PACKS.map(p => [{ text: p.text, callback_data: "buy:" + p.id }]) };
-const ritualKb = (t) => ({ inline_keyboard: [[{ text: "🤲 خواندم، استخاره کن", callback_data: "draw:" + t }], [{ text: "↩️ انصراف", callback_data: "home" }]] });
-const resultKb = (t) => ({ inline_keyboard: [[{ text: "💎 استخاره تخصصی " + topicShort(t), callback_data: "unlock:" + t }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] });
-const unlockedKb = (t) => ({ inline_keyboard: [[{ text: "📖 مشاهدهٔ استخاره تخصصی", callback_data: "view:" + t }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] });
-const noCreditKb = { inline_keyboard: [[{ text: "🛍 مشاهدهٔ بسته‌ها", callback_data: "store" }], [{ text: "🔮 استخاره جدید", callback_data: "new" }]] };
+// ========== 5. KEYBOARDS ==========
+const mainKb = {
+  keyboard: [
+    [{ text: "🔮 استخاره" }],
+    [{ text: "👤 حساب من" }, { text: "🛍 فروشگاه" }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+};
 
-const accountKb = { inline_keyboard: [
-  [{ text: "📜 تاریخچه‌ی استخاره‌ها", callback_data: "history" }],
-  [{ text: "🎁 دعوت دوستان", callback_data: "referral" }],
-  [{ text: "🛍 فروشگاه", callback_data: "store" }],
-]};
+const storeKb = { inline_keyboard: PACKS.map(p => [{ text: p.text, callback_data: "buy:" + p.id }]) };
+
+const ritualKb = (t) => ({
+  inline_keyboard: [
+    [{ text: "🤲 خواندم، استخاره کن", callback_data: "draw:" + t }],
+    [{ text: "↩️ انصراف", callback_data: "home" }],
+  ],
+});
+
+const resultKb = (t) => ({
+  inline_keyboard: [
+    [{ text: "💎 استخاره تخصصی " + topicShort(t), callback_data: "unlock:" + t }],
+    [{ text: "🔮 استخاره جدید", callback_data: "new" }],
+  ],
+});
+
+const unlockedKb = (t) => ({
+  inline_keyboard: [
+    [{ text: "📖 مشاهدهٔ استخاره تخصصی", callback_data: "view:" + t }],
+    [{ text: "🔮 استخاره جدید", callback_data: "new" }],
+  ],
+});
+
+const noCreditKb = {
+  inline_keyboard: [
+    [{ text: "🛍 مشاهدهٔ بسته‌ها", callback_data: "store" }],
+    [{ text: "🔮 استخاره جدید", callback_data: "new" }],
+  ],
+};
+
+const accountKb = {
+  inline_keyboard: [
+    [{ text: "📜 تاریخچه‌ی استخاره‌ها", callback_data: "history" }],
+    [{ text: "🎁 دعوت دوستان", callback_data: "referral" }],
+    [{ text: "🛍 فروشگاه", callback_data: "store" }],
+  ],
+};
 
 function catKb() {
   const rows = [];
@@ -691,9 +598,14 @@ function topicKb(catId) {
   const rows = []; let pair = null;
   for (const t of visible) {
     const btn = { text: t.label, callback_data: "topic:" + t.id };
-    if (t.label.length > 12) { if (pair) { rows.push([pair]); pair = null; } rows.push([btn]); }
-    else if (pair) { rows.push([pair, btn]); pair = null; }
-    else pair = btn;
+    if (t.label.length > 12) {
+      if (pair) { rows.push([pair]); pair = null; }
+      rows.push([btn]);
+    } else if (pair) {
+      rows.push([pair, btn]); pair = null;
+    } else {
+      pair = btn;
+    }
   }
   if (pair) rows.push([pair]);
   rows.push([{ text: "↩️ بازگشت", callback_data: "cats" }]);
@@ -723,7 +635,7 @@ function referralKb(link) {
   return { inline_keyboard: rows };
 }
 
-// ========== 7. MESSAGE BUILDERS ==========
+// ========== 6. MESSAGE BUILDERS ==========
 function freeMsg(r, t) {
   const f = r.free || {};
   const opening = f.opening || f.salutation || "";
@@ -831,7 +743,7 @@ function premiumMsg(r, t) {
   return parts.join("\n");
 }
 
-// ========== 8. HANDLERS ==========
+// ========== 7. HANDLERS ==========
 async function onMessage(env, m, allowedUsers) {
   const chat = m.chat.id;
   const text = (m.text || "").trim();
@@ -1217,7 +1129,7 @@ async function onSuccessfulPayment(env, m) {
   return sendMessage(env, chat, "🎉 پرداخت موفق!\n\n💎 " + toFa(pack.credits + pack.bonus) + " اعتبار به حساب تو اضافه شد.", mainKb);
 }
 
-// ========== 9. MAIN WORKER ==========
+// ========== 8. MAIN WORKER ==========
 export default {
   async fetch(request, env) {
     if (request.method === "GET") {
@@ -1241,17 +1153,27 @@ export default {
         const botUsername = await getBotUsername(env);
 
         return new Response(JSON.stringify({
-          version: 28, schema: "v6.2", doPrefix: DO_VERSION_PREFIX,
+          version: 28,
+          schema: "v6.2",
+          modularized: true,
+          doPrefix: DO_VERSION_PREFIX,
           botUsername: botUsername || "(unknown)",
-          backupMode: "kv", historyLimit: HISTORY_LIMIT,
+          backupMode: "kv",
+          historyLimit: HISTORY_LIMIT,
           referral: { referrerReward: REFERRAL_REWARD_REFERRER, newUserReward: REFERRAL_REWARD_NEW_USER },
-          hasToken: !!env.BOT_TOKEN, hasKV: !!env.USERS_KV, hasDO: !!env.CREDIT_MANAGER,
+          hasToken: !!env.BOT_TOKEN,
+          hasKV: !!env.USERS_KV,
+          hasDO: !!env.CREDIT_MANAGER,
           hasAdminSecret: !!env.ADMIN_SECRET,
           duaBankCount: Object.keys(DUA_BANK).length,
-          records: CONTENT.length, expectedRecords: 302,
-          missingCount: missingPages.length, missingPages, duplicatedPages,
+          records: CONTENT.length,
+          expectedRecords: 302,
+          missingCount: missingPages.length,
+          missingPages,
+          duplicatedPages,
           wallet: (env.WALLET_TOKEN || "").startsWith("WALLET-TEST") ? "test" : "real",
-          rateLimitMs: DRAW_COOLDOWN_MS, adminsCount: adminUsers.length,
+          rateLimitMs: DRAW_COOLDOWN_MS,
+          adminsCount: adminUsers.length,
           backupRetentionDays: BACKUP_RETENTION_DAYS,
           privateMode: allowedUsers.length > 0 ? allowedUsers.length + " users allowed" : "public (all users)",
         }, null, 2), { headers: { "Content-Type": "application/json" } });
